@@ -124,15 +124,27 @@ impl std::error::Error for Error {}
 /// against that figure. At 4,347 samples per second or less the figure comes
 /// out at zero, and the remainder divides by zero, which ends the process on
 /// the spot.
+///
+/// That division is a reason to refuse the rate in [`key_of_audio`], not in
+/// [`frame_samples`]. [`frame_samples`] is safe at every rate, because the
+/// shim it calls holds the same figure at one or more before it uses it.
+/// [`frame_samples`] answers zero for a rate below this one so that the two
+/// functions agree on which rates this crate works at.
 pub const LOWEST_SAMPLE_RATE: u32 = 8_000;
 
 /// The highest sample rate [`key_of_audio`] and [`frame_samples`] accept, in
 /// samples per second.
 ///
-/// This is the highest rate audio is recorded at. libkeyfinder turns the rate
-/// away only when it is zero, and works every other size it uses out from the
-/// rate without checking any of them, so this wrapper keeps the rate inside
-/// the range libkeyfinder was written for.
+/// This is the highest rate audio is recorded at. libkeyfinder works out the
+/// same downsampling figure from the rate, and its low-pass filter then steps
+/// the write position through the track by that figure once for every sample
+/// it writes, without checking that the position is still inside the track.
+/// `LowPassFilterPrivate::filter` in `vendor/libkeyfinder/src/lowpassfilter.cpp`
+/// takes the step, and `AudioData::advanceWriteIterator` in
+/// `vendor/libkeyfinder/src/audiodata.cpp` makes it. At a rate of 2,147,483,647
+/// the figure is about 494,000, so on a track of 44,100 samples the step walks
+/// the write position outside the memory that holds the track, which
+/// AddressSanitizer reports as a read past the end of a heap buffer.
 pub const HIGHEST_SAMPLE_RATE: u32 = 384_000;
 
 /// Whether `sample_rate` is one of the rates this crate passes to
@@ -154,7 +166,10 @@ fn sample_rate_is_usable(sample_rate: u32) -> bool {
 /// Dermixen's own key analyzer does.
 ///
 /// The answer is zero for a rate outside [`LOWEST_SAMPLE_RATE`] to
-/// [`HIGHEST_SAMPLE_RATE`], which [`key_of_audio`] refuses.
+/// [`HIGHEST_SAMPLE_RATE`], which [`key_of_audio`] refuses. A caller that uses
+/// the answer as a least length has to check the sample rate itself before it
+/// compares anything against the answer, because a length compared against
+/// zero passes however short the audio is.
 pub fn frame_samples(sample_rate: u32) -> usize {
     if !sample_rate_is_usable(sample_rate) {
         return 0;
@@ -197,10 +212,16 @@ pub fn frame_samples(sample_rate: u32) -> usize {
 /// finite number. A sample rate outside [`LOWEST_SAMPLE_RATE`] to
 /// [`HIGHEST_SAMPLE_RATE`] is also [`Error::Failed`], with a reason that names
 /// the sample rate, and that rate never reaches libkeyfinder. libkeyfinder
-/// works out how far to downsample a track from the rate and then takes the
-/// remainder of the sample count against that figure, and at a rate of 4,347
-/// samples per second or less the figure is zero, so the remainder divides by
-/// zero and ends the process on the spot.
+/// works out how far to downsample a track from the rate, and each end of the
+/// range keeps that figure away from a value that breaks libkeyfinder. Below
+/// the range the figure is zero, and libkeyfinder takes the remainder of the
+/// sample count against it, which divides by zero and ends the process on the
+/// spot. Above the range the figure grows with the rate, and libkeyfinder's
+/// low-pass filter steps the write position through the track by that figure
+/// without checking that the position is still inside the track, so a figure
+/// larger than the track walks the write position off the end of the memory
+/// that holds the track. [`LOWEST_SAMPLE_RATE`] and [`HIGHEST_SAMPLE_RATE`]
+/// each state their own end of the range in full.
 pub fn key_of_audio(samples: &[f32], sample_rate: u32) -> Result<Analysis, Error> {
     // libkeyfinder builds its tone profiles the first time an analysis asks
     // for them, without guarding that first build against a second thread

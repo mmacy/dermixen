@@ -6,7 +6,11 @@ Dermixen uses libkeyfinder as the baseline row on the key scoreboard. The row is
 
 The crates that make up the app itself forbid unsafe code, and calling into a C++ library needs it, so all of the risk of these calls sits in `src/lib.rs`, which is short enough to read in one sitting. Four crates allow unsafe code: this one, `crates/signalsmith-sys` for the time-stretcher, `crates/aubio-sys` for the beat tracker, and `crates/macos-documents-sys` for the documents macOS asks the app to open.
 
-Both functions `src/lib.rs` offers check the sample rate before they reach the C++. `key_of_audio` fails, and `frame_samples` answers zero, for a rate outside 8,000 to 384,000 samples per second, because libkeyfinder works out how far to downsample a track from the rate and divides by the result.
+Both functions `src/lib.rs` offers check the sample rate before they reach the C++. `key_of_audio` fails, and `frame_samples` answers zero, for a rate outside 8,000 to 384,000 samples per second.
+
+The rate matters to `key_of_audio` because libkeyfinder works out how far to downsample a track by dividing half the rate by the highest frequency it looks for, and that figure breaks libkeyfinder at both ends of the range. At 4,347 samples per second or less the figure is zero, and libkeyfinder takes the remainder of the sample count against it, which divides by zero and ends the process on the spot. At a rate of 2,147,483,647 the figure is about 494,000, and libkeyfinder's low-pass filter steps the write position through the track by that figure once for every sample it writes, without checking that the position is still inside the track, so on a track of 44,100 samples it reads past the end of the memory holding the track.
+
+`frame_samples` is safe at every rate on its own, because `src/shim.cpp` holds the same figure at one or more before it uses it. `frame_samples` answers zero below 8,000 and above 384,000 so that the two functions agree on which rates this crate works at. A caller that uses the answer as a least length has to check the sample rate itself first, because a length compared against zero passes however short the audio is.
 
 ## What is vendored
 

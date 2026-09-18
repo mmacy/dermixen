@@ -65,9 +65,10 @@ pub struct Stretch {
 ///
 /// This is the lowest rate audio is recorded at. The library works out the
 /// window it analyzes, and the interval between one window and the next, from
-/// the sample rate, and holds each as a whole number of samples. A rate below
-/// thirty-four samples per second leaves the interval at zero, which the
-/// library divides by and steps a loop by.
+/// the sample rate, and holds each as a whole number of samples. The interval
+/// is three hundredths of the rate, so it is zero for every rate below one
+/// hundred divided by three, which is 33.34 samples per second to the nearest
+/// hundredth. The library divides by that interval and steps a loop by it.
 pub const LOWEST_SAMPLE_RATE: f32 = 8_000.0;
 
 /// The highest sample rate [`Stretch::new`] accepts, in samples per second.
@@ -99,9 +100,13 @@ impl Stretch {
     /// to [`HIGHEST_SAMPLE_RATE`]. The library sizes its buffers from the
     /// rate without checking it, so a rate outside that range must never
     /// reach the library. A sample rate that is not a number, and a sample
-    /// rate of infinity, fail that comparison as well. `None` also comes back
-    /// for a seed outside the range of the C type the seed is passed as, which
-    /// on macOS and Linux is the whole of [`i64`].
+    /// rate of infinity, fail that comparison as well.
+    ///
+    /// `None` also comes back for a seed too large for the C type the seed is
+    /// passed as. That cannot happen on macOS or on Linux, the two systems
+    /// Dermixen runs on, because a C `long` holds the whole of [`i64`] on
+    /// both. The conversion is here so that a platform whose C `long` is
+    /// narrower cannot hand the library a seed cut down to fit.
     ///
     /// # Panics
     ///
@@ -159,9 +164,13 @@ impl Stretch {
     ///
     /// # Panics
     ///
-    /// Panics if the C++ side cannot build the library object again, which it
-    /// reports when it runs out of memory. The stretcher then holds the audio
-    /// it held before the call, so a panic here never leaves it half reset.
+    /// Panics if the C++ side reports that it could not build the library
+    /// object again. The one thing that makes it report so is the allocator
+    /// refusing the memory for the new buffers. The C++ side catches the
+    /// exception the allocator raises and answers with a status, so the
+    /// exception never crosses into Rust, and this panic is Rust's own. The
+    /// stretcher then holds the audio it held before the call, so a panic here
+    /// never leaves it half reset.
     pub fn reset(&mut self) {
         // SAFETY: the pointer is the one `new` returns and this value still owns it.
         let status = unsafe { dermixen_signalsmith_reset(self.stretcher) };
@@ -185,9 +194,15 @@ impl Stretch {
     ///
     /// # Panics
     ///
-    /// Panics if either slice is not a whole number of frames, if either frame
-    /// count is above [`c_int::MAX`], or if the C++ side cannot allocate the
-    /// buffers it separates the channels into.
+    /// Panics if either slice is not a whole number of frames, or if either
+    /// frame count is above [`c_int::MAX`].
+    ///
+    /// Panics as well if the C++ side reports that it could not stretch the
+    /// block. The one thing that makes it report so is the allocator refusing
+    /// the memory for the buffers the channels are separated into. The C++
+    /// side catches the exception the allocator raises and answers with a
+    /// status, so the exception never crosses into Rust, and this panic is
+    /// Rust's own.
     pub fn process(&mut self, input: &[f32], output: &mut [f32]) {
         let input_frames = self.frames(input.len(), "input");
         let output_frames = self.frames(output.len(), "output");

@@ -71,16 +71,6 @@ const LOWEST_SAMPLE_RATE: u32 = 8_000;
 /// is the highest rate audio is recorded at.
 const HIGHEST_SAMPLE_RATE: u32 = 384_000;
 
-/// The largest count of analysis steps [`Tempo::new`] passes on to aubio, which
-/// is two to the power of thirty-one.
-///
-/// aubio counts how many steps of analysis cover about six seconds of audio, as
-/// 5.8 times the sample rate divided by the hop, and rounds that count up to a
-/// power of two by doubling a 32-bit number until it reaches the count. Above
-/// this figure the doubling passes the largest 32-bit number, wraps to zero,
-/// and doubles zero for as long as the program runs.
-const MOST_OBSERVATIONS: f64 = 2_147_483_648.0;
-
 impl Tempo {
     /// Starts a beat tracker.
     ///
@@ -92,28 +82,23 @@ impl Tempo {
     /// must be from 8,000 to 384,000 samples per second, which spans the rates
     /// audio is recorded at.
     ///
-    /// Returns `None` for a sample rate outside that range, and for a rate and
-    /// a hop whose ratio would send aubio into a loop that never ends. aubio
-    /// works out how many steps of analysis cover about six seconds of audio,
-    /// as 5.8 times the rate divided by the hop, and rounds that count up to a
-    /// power of two by doubling a 32-bit number until it reaches the count. A
-    /// count above two thousand million makes the doubling wrap to zero and
-    /// keeps doubling zero, so this function turns such a pair away before
-    /// aubio sees it. Both checks answer at once, without calling aubio.
+    /// Returns `None` for a sample rate outside that range, and answers at once
+    /// without calling aubio. The range is what keeps aubio out of a loop that
+    /// never ends. aubio counts how many steps of analysis cover about six
+    /// seconds of audio, as 5.8 times the rate divided by the hop, and rounds
+    /// that count up to a power of two by doubling a 32-bit number until it
+    /// reaches the count. A count above 2,147,483,648 makes the doubling pass
+    /// the largest 32-bit number, wrap to zero, and double zero for as long as
+    /// the program runs. The largest count this range allows is 5.8 times
+    /// 384,000 over a hop of one, which is 2,227,200.
     ///
     /// Returns `None` as well when aubio rejects the three sizes or cannot
-    /// allocate its working buffers. aubio prints the reason on standard error
-    /// when it rejects them.
+    /// allocate its working buffers. aubio checks the sizes against each other
+    /// before it works the count out, and a hop of zero is one of the sizes it
+    /// refuses, so the count is never a division by zero. aubio prints the
+    /// reason on standard error when it rejects the sizes.
     pub fn new(window: usize, hop: usize, sample_rate: u32) -> Option<Tempo> {
         if !(LOWEST_SAMPLE_RATE..=HIGHEST_SAMPLE_RATE).contains(&sample_rate) {
-            return None;
-        }
-        // A hop of zero divides by zero here, which gives a count of infinity,
-        // or of nothing that is a number at all when the sample rate is zero
-        // as well. The check below turns away each of those two counts along
-        // with every count too large for aubio's doubling.
-        let observations = 5.8 * f64::from(sample_rate) / hop as f64;
-        if !observations.is_finite() || observations > MOST_OBSERVATIONS {
             return None;
         }
         let window = c_uint::try_from(window).ok()?;
@@ -122,10 +107,10 @@ impl Tempo {
         // which measure how much the spectrum changed since the last window.
         let method = c"default";
         // Safety: the method name is a null-terminated string that outlives
-        // the call. The sample rate and the ratio of the rate to the hop are
-        // inside the limits stated above, so aubio's own rounding to a power of
-        // two finishes. aubio checks the three sizes against each other itself
-        // and answers with a null pointer when it dislikes them.
+        // the call. The sample rate is inside the range stated above, so the
+        // count aubio rounds up to a power of two stays below the figure at
+        // which its doubling wraps. aubio checks the three sizes against each
+        // other itself and answers with a null pointer when it dislikes them.
         let tracker = unsafe { new_aubio_tempo(method.as_ptr(), window, hop_size, sample_rate) };
         Some(Tempo {
             tracker: NonNull::new(tracker)?,
