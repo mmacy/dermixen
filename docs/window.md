@@ -6,7 +6,7 @@ The window is a shell over the engine and the view-models. Everything it plays a
 
 ## The command
 
-```
+```text
 dermixen-app [MIX]
 ```
 

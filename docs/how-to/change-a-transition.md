@@ -4,7 +4,7 @@ A transition is nothing more than nodes: two tempo nodes that bring the tracks t
 
 ## Choose a preset when adding a track
 
-```
+```sh
 dermixen mix add set.dmx track.mp3 --preset bass-swap --bars 16
 ```
 
@@ -19,7 +19,7 @@ Four presets exist:
 
 ## Set the anchors by hand
 
-```
+```sh
 dermixen mix add set.dmx track.mp3 --intro 64 --outro 896
 ```
 
@@ -27,7 +27,7 @@ dermixen mix add set.dmx track.mp3 --intro 64 --outro 896
 
 ## Move an anchor of a track already in the mix
 
-```
+```sh
 dermixen mix move-anchor set.dmx 3 --outro 960
 ```
 
@@ -35,7 +35,7 @@ The track is named by its position, counting from one, and the nodes of the anch
 
 ## Insert a track between two others
 
-```
+```sh
 dermixen mix add set.dmx track.mp3 --position 2 --preset beatmix
 ```
 

@@ -17,7 +17,7 @@ On Linux:
 
 ## Build everything
 
-```
+```sh
 cargo build --release --workspace
 ```
 
@@ -25,7 +25,7 @@ The executables are `target/release/dermixen` and `target/release/dermixen-app`.
 
 ## Install the executables
 
-```
+```sh
 cargo install --path crates/cli
 cargo install --path crates/app
 ```
@@ -34,19 +34,19 @@ Both land in `~/.cargo/bin`, which is on your `PATH` when Rust was installed wit
 
 ## Build without the foreign libraries
 
-```
+```sh
 cargo build --release -p dermixen-cli --no-default-features
 ```
 
 The stretcher, the aubio beat tracker, the libkeyfinder key detector, the audio output, and the MP3 encoder sit behind the Cargo features `signalsmith`, `aubio`, `keyfinder`, `playback`, and `mp3`, all on by default. Without them, `dermixen` still finds grids and anchors with the built-in analyzers, still renders to WAV, and still writes a `play --capture` file, but it stores no key, resamples instead of preserving pitch, refuses an MP3 output, and can't play through a device. Turn on the ones you want by name:
 
-```
+```sh
 cargo build --release -p dermixen-cli --no-default-features --features signalsmith,mp3
 ```
 
 ## Run the checks
 
-```
+```sh
 scripts/check.sh
 ```
 
@@ -56,7 +56,7 @@ The script runs the formatting check, the lints, and every test in the workspace
 
 The pages in `docs/` are also a website, built with MkDocs and the Material theme. `pyproject.toml` at the root of the repository lists the toolchain, and [uv](https://docs.astral.sh/uv/) installs it.
 
-```
+```sh
 uv sync
 uv run mkdocs serve
 ```

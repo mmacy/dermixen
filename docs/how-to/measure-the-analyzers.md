@@ -12,7 +12,7 @@ Every grid you fix and every anchor you move in the window is written out as an 
 
 Each correction is a file named after the track's audio file, then a hyphen and eight digits of the track's content hash, then `.anchors`. It contains the track's path, the grid's tempo and beat zero, and each anchor in seconds, marked `ear` as placed by listening. The scoreboard reads an annotation only from beside the audio file it belongs to, named the same way, and `tools/anchor_truth.py link` arranges that:
 
-```
+```sh
 python3 tools/anchor_truth.py link ~/Library/Application\ Support/dermixen/corrections ~/audio --out ~/dermixen-truth
 ```
 
@@ -20,7 +20,7 @@ The command copies the annotations, finds the audio under the second path by the
 
 ## Run the scoreboard
 
-```
+```sh
 dermixen scoreboard ~/dermixen-truth
 ```
 
@@ -30,7 +30,7 @@ The command runs every built-in analyzer over the folder and prints five tables:
 
 The committed ground truth is `tests/ground-truth/anchors/`, without the audio. Copy the corrections you trust into that folder, and every analyzer is measured against them from then on:
 
-```
+```sh
 dermixen scoreboard tests/ground-truth/anchors
 ```
 
@@ -38,7 +38,7 @@ The audio has to be beside the annotations for that command to run, which `tools
 
 ## Measure against a public dataset
 
-```
+```sh
 dermixen scoreboard --giantsteps path/to/giantsteps-tempo-dataset
 ```
 

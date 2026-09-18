@@ -1,0 +1,172 @@
+/*
+  The documentation site's colors. Every color here comes from the app icon
+  in packaging/icon/dermixen.svg: the charcoal plate the D sits on, the sky
+  blue of the incoming curve, and the lime green of the outgoing curve.
+
+  The header is the icon's charcoal in both schemes, so the logo blends into
+  it. Links are blue and their hover and focus states are green, which is the
+  left-to-right sweep of the D. The light scheme darkens the two icon colors
+  until they contrast with white at 4.5:1 or better. The dark scheme uses the
+  icon colors as drawn, on a page the color of the icon's plate.
+*/
+
+:root {
+  --dermixen-plate: #24262b;
+  --dermixen-plate-dark: #1a1b1e;
+  --dermixen-blue: #4fb3f0;
+  --dermixen-green: #9ae24a;
+}
+
+/* Colors that both schemes share: the header and the search box in it. */
+[data-md-color-primary="custom"] {
+  --md-primary-fg-color: var(--dermixen-plate);
+  --md-primary-fg-color--light: #3a3d44;
+  --md-primary-fg-color--dark: var(--dermixen-plate-dark);
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: rgba(255, 255, 255, 0.7);
+}
+
+/* The light scheme. */
+[data-md-color-scheme="default"] {
+  --md-accent-fg-color: #3f7f0a;
+  --md-accent-fg-color--transparent: rgba(63, 127, 10, 0.1);
+  --md-accent-bg-color: #ffffff;
+  --md-accent-bg-color--light: rgba(255, 255, 255, 0.7);
+
+  --md-default-fg-color: #1f2226;
+  --md-default-fg-color--light: rgba(31, 34, 38, 0.72);
+  --md-default-fg-color--lighter: rgba(31, 34, 38, 0.36);
+  --md-default-fg-color--lightest: rgba(31, 34, 38, 0.07);
+  --md-default-bg-color: #fafbfd;
+  --md-default-bg-color--light: rgba(250, 251, 253, 0.7);
+  --md-default-bg-color--lighter: rgba(250, 251, 253, 0.4);
+  --md-default-bg-color--lightest: rgba(250, 251, 253, 0.2);
+
+  --md-typeset-color: #1f2226;
+  --md-typeset-a-color: #0f6fb3;
+  --md-typeset-mark-color: rgba(154, 226, 74, 0.45);
+
+  --md-typeset-table-color: rgba(31, 34, 38, 0.12);
+  --md-typeset-table-color--light: rgba(79, 179, 240, 0.06);
+
+  --md-code-fg-color: #24262b;
+  --md-code-bg-color: #eef2f7;
+  --md-code-hl-color: rgba(154, 226, 74, 0.3);
+  --md-code-hl-keyword-color: #0f6fb3;
+  --md-code-hl-function-color: #6a3fb8;
+  --md-code-hl-string-color: #3f7f0a;
+  --md-code-hl-number-color: #b5451b;
+  --md-code-hl-constant-color: #0f6fb3;
+  --md-code-hl-special-color: #b5451b;
+  --md-code-hl-name-color: var(--md-code-fg-color);
+  --md-code-hl-operator-color: var(--md-default-fg-color--light);
+  --md-code-hl-punctuation-color: var(--md-default-fg-color--light);
+  --md-code-hl-comment-color: var(--md-default-fg-color--light);
+  --md-code-hl-generic-color: var(--md-default-fg-color--light);
+  --md-code-hl-variable-color: var(--md-default-fg-color--light);
+
+  --md-footer-bg-color: var(--dermixen-plate);
+  --md-footer-bg-color--dark: var(--dermixen-plate-dark);
+}
+
+/* Headings in the light scheme are the plate's charcoal rather than Material's
+   grey, so they carry the same weight as the header. */
+[data-md-color-scheme="default"] .md-typeset h1,
+[data-md-color-scheme="default"] .md-typeset h2,
+[data-md-color-scheme="default"] .md-typeset h3 {
+  color: var(--md-default-fg-color);
+}
+
+/* The light scheme's header ends in the icon's sweep, blue on the left to
+   green on the right. */
+[data-md-color-scheme="default"] .md-header::after {
+  content: "";
+  display: block;
+  height: 0.15rem;
+  background: linear-gradient(90deg, var(--dermixen-blue), var(--dermixen-green));
+}
+
+/* Fenced code in the light scheme gets a hairline so it sits on the tinted page. */
+[data-md-color-scheme="default"] .md-typeset pre > code {
+  box-shadow: inset 0 0 0 1px rgba(31, 34, 38, 0.07);
+}
+
+/* Table header rows take a faint wash of the icon's blue. */
+[data-md-color-scheme="default"] .md-typeset table:not([class]) th {
+  background-color: rgba(79, 179, 240, 0.1);
+}
+
+/* The dark scheme. The page is the icon's plate and the header is its darker edge. */
+[data-md-color-scheme="slate"] {
+  --md-accent-fg-color: var(--dermixen-green);
+  --md-accent-fg-color--transparent: rgba(154, 226, 74, 0.12);
+  --md-accent-bg-color: var(--dermixen-plate-dark);
+  --md-accent-bg-color--light: rgba(26, 27, 30, 0.7);
+
+  --md-primary-fg-color: var(--dermixen-plate-dark);
+  --md-primary-fg-color--light: #2d2f34;
+  --md-primary-fg-color--dark: #121316;
+
+  --md-default-fg-color: #e6e8ec;
+  --md-default-fg-color--light: #a5a9b2;
+  --md-default-fg-color--lighter: rgba(230, 232, 236, 0.32);
+  --md-default-fg-color--lightest: rgba(230, 232, 236, 0.1);
+  --md-default-bg-color: #1e2024;
+  --md-default-bg-color--light: rgba(30, 32, 36, 0.7);
+  --md-default-bg-color--lighter: rgba(30, 32, 36, 0.4);
+  --md-default-bg-color--lightest: rgba(30, 32, 36, 0.2);
+
+  --md-typeset-color: #e6e8ec;
+  --md-typeset-a-color: var(--dermixen-blue);
+  --md-typeset-mark-color: rgba(154, 226, 74, 0.35);
+  --md-typeset-kbd-color: #2a2c31;
+  --md-typeset-kbd-accent-color: #34373d;
+  --md-typeset-kbd-border-color: #121316;
+  --md-typeset-table-color: rgba(230, 232, 236, 0.14);
+  --md-typeset-table-color--light: rgba(230, 232, 236, 0.04);
+
+  --md-code-fg-color: #dfe2e8;
+  --md-code-bg-color: #26282d;
+  --md-code-hl-color: rgba(154, 226, 74, 0.2);
+  --md-code-hl-color--light: rgba(154, 226, 74, 0.1);
+  --md-code-hl-keyword-color: var(--dermixen-blue);
+  --md-code-hl-function-color: #c9a6ff;
+  --md-code-hl-string-color: var(--dermixen-green);
+  --md-code-hl-number-color: #ffb07a;
+  --md-code-hl-constant-color: var(--dermixen-blue);
+  --md-code-hl-special-color: #ffb07a;
+  --md-code-hl-name-color: var(--md-code-fg-color);
+  --md-code-hl-operator-color: var(--md-default-fg-color--light);
+  --md-code-hl-punctuation-color: var(--md-default-fg-color--light);
+  --md-code-hl-comment-color: var(--md-default-fg-color--light);
+  --md-code-hl-generic-color: var(--md-default-fg-color--light);
+  --md-code-hl-variable-color: var(--md-default-fg-color--light);
+
+  --md-admonition-fg-color: var(--md-default-fg-color);
+  --md-admonition-bg-color: var(--md-default-bg-color);
+
+  --md-footer-bg-color: var(--dermixen-plate-dark);
+  --md-footer-bg-color--dark: #121316;
+
+  --md-shadow-z1: 0 0.2rem 0.5rem rgba(0, 0, 0, 0.3), 0 0 0.05rem rgba(0, 0, 0, 0.2);
+  --md-shadow-z2: 0 0.2rem 0.5rem rgba(0, 0, 0, 0.4), 0 0 0.05rem rgba(0, 0, 0, 0.3);
+  --md-shadow-z3: 0 0.2rem 0.5rem rgba(0, 0, 0, 0.5), 0 0 0.05rem rgba(0, 0, 0, 0.4);
+}
+
+/* In the dark scheme the header and the page are close in tone, so a faint
+   line marks the edge, the same way the icon's plate has a faint inner rim. */
+[data-md-color-scheme="slate"] .md-header {
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+[data-md-color-scheme="slate"] .md-header[data-md-state="shadow"],
+[data-md-color-scheme="slate"] .md-header--shadow {
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06), 0 0.2rem 0.5rem rgba(0, 0, 0, 0.4);
+}
+
+/* The logo is a rounded square with its own plate, so it needs no padding. */
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 1.6rem;
+  width: 1.6rem;
+  border-radius: 0.35rem;
+}

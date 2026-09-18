@@ -4,7 +4,7 @@ A scan walks a folder, analyzes every audio file that [the library](../library.m
 
 ## Scan a folder
 
-```
+```sh
 dermixen library scan ~/audio/goa
 ```
 
@@ -14,7 +14,7 @@ Analysis takes about three seconds per track, so a thousand tracks take about an
 
 ## Leave folders out
 
-```
+```sh
 dermixen library scan ~/audio/goa --exclude mixes --exclude samples
 ```
 
@@ -36,7 +36,7 @@ Run the same scan again. Every file is hashed, and a hash the library already co
 
 ## Read the summary from a script
 
-```
+```sh
 dermixen library scan ~/audio/goa --json
 ```
 

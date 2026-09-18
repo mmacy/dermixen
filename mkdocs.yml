@@ -11,19 +11,31 @@ theme:
   # The app icon, copied from packaging/icon/dermixen.svg by scripts/make-icon.sh.
   logo: images/dermixen-icon.svg
   favicon: images/dermixen-icon.svg
+  features:
+    # A button in the corner of every code block copies its text.
+    - content.code.copy
   palette:
     # The toggle switches between the light and dark schemes, and the site
     # remembers the reader's choice.
     - media: "(prefers-color-scheme: light)"
       scheme: default
+      primary: custom
+      accent: custom
       toggle:
         icon: material/weather-night
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
+      primary: custom
+      accent: custom
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode
+
+# The site's colors, taken from the app icon. See the comment at the top of
+# the stylesheet.
+extra_css:
+  - stylesheets/dermixen.css
 
 markdown_extensions:
   # Syntax highlighting for fenced and inline code. highlight tokenizes with
@@ -66,6 +78,11 @@ nav:
       - Drive Dermixen from a script: how-to/drive-dermixen-from-a-script.md
       - Measure the analyzers: how-to/measure-the-analyzers.md
       - Build from source: how-to/build-from-source.md
+  - Explanation:
+      - How a mix fits together: explanation/how-a-mix-fits-together.md
+      - What you hear is what renders: explanation/what-you-hear-is-what-renders.md
+      - How analysis is trusted: explanation/how-analysis-is-trusted.md
+      - The command and agents: explanation/the-command-and-agents.md
   - Reference:
       - The dermixen command: cli.md
       - The window: window.md
@@ -74,11 +91,6 @@ nav:
       - Settings: settings.md
       - Ground truth for the scoreboard: ground-truth.md
       - Test fixtures: fixtures.md
-  - Explanation:
-      - How a mix fits together: explanation/how-a-mix-fits-together.md
-      - What you hear is what renders: explanation/what-you-hear-is-what-renders.md
-      - How analysis is trusted: explanation/how-analysis-is-trusted.md
-      - The command and agents: explanation/the-command-and-agents.md
 
 plugins:
   - search

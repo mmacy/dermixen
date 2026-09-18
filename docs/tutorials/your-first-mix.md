@@ -11,14 +11,14 @@ The steps below use two tracks from a folder named `comp` under `~/audio/goa`. S
 
 ## Scan the folder
 
-```
+```sh
 cd ~/audio/goa
 dermixen library scan comp
 ```
 
 The scan finds every audio file under `comp`, analyzes each one, and stores the results in [the library](../library.md), which is everything Dermixen has learned about your tracks, kept in one file in your data folder. One line per file goes to your terminal as the scan proceeds, and a summary follows:
 
-```
+```text
 added 12
 moved 0
 unchanged 0
@@ -30,13 +30,13 @@ Analysis takes about three seconds per track, so a folder of twelve tracks takes
 
 ## Look at what the scan found
 
-```
+```sh
 dermixen library query --under comp --bpm 139-146
 ```
 
 One line per track: the Camelot code, the tempo, the artist and title, and the path.
 
-```
+```text
 12A   139.9 bpm  Total Eclipse & Simon Posford  Sound Is Solid (Remix)            /Users/dermixenuser/audio/goa/comp/VA - Mind Rewind [DMRCD01]/202 Total Eclipse & Simon Posford - Sound Is Solid (Remix).mp3
 ```
 
@@ -44,7 +44,7 @@ Pick two tracks within a few beats per minute of each other. Two tracks that sha
 
 ## Create the mix
 
-```
+```sh
 dermixen mix new set.dmx
 ```
 
@@ -52,13 +52,13 @@ The command writes an empty mix document to `set.dmx` and prints `wrote set.dmx`
 
 ## Add the first track
 
-```
+```sh
 dermixen mix add set.dmx "comp/VA - Fill Your Head with Phantasm Vol 2/VARIOUS ARTISTS - FILL YOUR HEAD WITH PHANTASM VOL.2 - 07 L.S.C. - Big Brain.mp3"
 ```
 
 The command takes the track's record from the library and prints the timeline:
 
-```
+```text
   1  VARIOUS ARTISTS - FILL YOUR HEAD WITH PHANTASM VOL.2 - 07 L.S.C. - Big Brain.mp3   145.00 bpm    +3.7 dB  intro       32  outro      960  0:00.0 to 7:51.1
 1 track, 7:51.1 long, 20774040 samples
 ```
@@ -67,11 +67,11 @@ Each line gives the track's position, its file name, its original tempo, the gai
 
 ## Add the second track
 
-```
+```sh
 dermixen mix add set.dmx "comp/VA - Mind Rewind [DMRCD01]/202 Total Eclipse & Simon Posford - Sound Is Solid (Remix).mp3"
 ```
 
-```
+```text
   1  VARIOUS ARTISTS - FILL YOUR HEAD WITH PHANTASM VOL.2 - 07 L.S.C. - Big Brain.mp3   145.00 bpm    +3.7 dB  intro       32  outro      960  0:00.0 to 7:53.5
   2  202 Total Eclipse & Simon Posford - Sound Is Solid (Remix).mp3   139.85 bpm    -6.7 dB  intro       64  outro      816  6:10.5 to 12:55.8
 2 tracks, 12:55.8 long, 34214245 samples
@@ -81,13 +81,13 @@ The times at the end of each line are where the track's file begins and ends on 
 
 ## Render the transition and listen
 
-```
+```sh
 dermixen render set.dmx transition.wav --from 6:00 --for 2:00
 ```
 
 The command renders two minutes of the mix from 6:00 as a 16-bit WAV file, decoding each track as the render reaches it. Progress lines go to standard error as it runs, and the last line names the file:
 
-```
+```text
 wrote transition.wav: 2:00.0 long, 5292000 samples
 ```
 
@@ -95,7 +95,7 @@ Open `transition.wav` in any player. The first track runs alone for the first tw
 
 ## Render the whole mix
 
-```
+```sh
 dermixen render set.dmx set.mp3
 ```
 
@@ -103,7 +103,7 @@ A name that ends in `.mp3` gives a 320 kbps MP3, and any other name gives a 16-b
 
 ## Open the mix in the window
 
-```
+```sh
 dermixen open set.dmx
 ```
 

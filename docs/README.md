@@ -1,6 +1,6 @@
 # <img src="images/dermixen-icon.svg" alt="Dermixen icon" width="44" align="top"> Dermixen documentation
 
-Start with a tutorial if you're new to Dermixen, a how-to guide when you have a task in hand, a reference page for the facts about a command or a control, and an explanation page for how the app works and why.
+Start with a tutorial if you're new to Dermixen, a how-to guide when you have a task in hand, an explanation page for how the app works and why, and a reference page for the facts about a command or a control.
 
 ## Tutorials
 
@@ -21,6 +21,13 @@ Start with a tutorial if you're new to Dermixen, a how-to guide when you have a 
 - [Measure the analyzers on your own corrections](how-to/measure-the-analyzers.md)
 - [Build from source](how-to/build-from-source.md)
 
+## Explanation
+
+- [How a mix fits together](explanation/how-a-mix-fits-together.md): the playlist, the anchors, the one tempo curve, the volume and EQ curves, and why a transition is nothing but nodes.
+- [What you hear is what renders](explanation/what-you-hear-is-what-renders.md): one render path for preview and render, and what the app does to never lose work.
+- [How analysis is trusted](explanation/how-analysis-is-trusted.md): the scoreboard, the baselines, confidence, and the correction loop.
+- [The command and agents](explanation/the-command-and-agents.md): why the command is a front door and how an agent builds a mix through it.
+
 ## Reference
 
 - [The `dermixen` command](cli.md): every command, its options, its output, and its exit codes.
@@ -32,12 +39,5 @@ Start with a tutorial if you're new to Dermixen, a how-to guide when you have a 
 - [Test fixtures](fixtures.md): the three tiers of audio the tests use.
 - [The JSON schema](json/dermixen.schema.json): the shape of every command's `--json` output.
 - [Tools](https://github.com/mmacy/dermixen/blob/main/tools/README.md): the Python programs beside the app, including the MixMeister playlist reader.
-
-## Explanation
-
-- [How a mix fits together](explanation/how-a-mix-fits-together.md): the playlist, the anchors, the one tempo curve, the volume and EQ curves, and why a transition is nothing but nodes.
-- [What you hear is what renders](explanation/what-you-hear-is-what-renders.md): one render path for preview and render, and what the app does to never lose work.
-- [How analysis is trusted](explanation/how-analysis-is-trusted.md): the scoreboard, the baselines, confidence, and the correction loop.
-- [The command and agents](explanation/the-command-and-agents.md): why the command is a front door and how an agent builds a mix through it.
 
 `DESIGN.md` at the root of the repository is the specification, and `PLAN.md` is the working method.
