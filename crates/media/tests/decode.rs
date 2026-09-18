@@ -429,3 +429,39 @@ fn a_track_longer_than_the_limit_is_refused_before_it_is_decoded() {
         );
     }
 }
+
+#[test]
+fn a_resampled_track_is_within_the_limit_too() {
+    // A resampling filter overshoots, so a square wave at the limit comes out
+    // of the resampler past it unless the output is held as well.
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("square-48k.wav");
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: 48_000,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+    for n in 0..48_000 {
+        let value = if (n / 100) % 2 == 0 { 8.0_f32 } else { -8.0 };
+        writer.write_sample(value).unwrap();
+        writer
+            .write_sample(if n == 24_000 { f32::NAN } else { value })
+            .unwrap();
+    }
+    writer.finalize().unwrap();
+    let decoded = decode(&path).unwrap();
+    assert!((44_000..=44_200).contains(&decoded.audio.len().0));
+    let largest = decoded
+        .audio
+        .frames
+        .iter()
+        .flat_map(|frame| frame.iter())
+        .fold(0.0_f32, |most, sample| {
+            assert!(sample.is_finite());
+            most.max(sample.abs())
+        });
+    assert!(largest <= 8.0, "{largest}");
+    assert!(largest > 7.0, "{largest}");
+}

@@ -257,3 +257,42 @@ fn the_settings_file_is_read_with_a_limit_and_written_atomically() {
     );
     assert!(started.elapsed() < Duration::from_secs(1));
 }
+
+#[test]
+#[ignore = "file-helpers-links"]
+fn a_destination_that_is_a_link_keeps_the_link_and_replaces_its_target() {
+    // A person who keeps a settings file or a mix document in another folder
+    // and links to it gets the new contents where the link points.
+    let folder = tempfile::tempdir().unwrap();
+    let kept = folder.path().join("kept");
+    fs::create_dir(&kept).unwrap();
+    let target = kept.join("settings.toml");
+    fs::write(&target, "old").unwrap();
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
+    let link = folder.path().join("settings.toml");
+    symlink(&target, &link).unwrap();
+
+    write_atomically(&link, false, b"new").unwrap();
+    assert!(
+        fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(fs::read(&target).unwrap(), b"new");
+    assert_eq!(mode_of(&target), 0o600);
+    assert_eq!(names_in(&kept), ["settings.toml"]);
+    assert_eq!(names_in(folder.path()), ["kept", "settings.toml"]);
+
+    // A link whose target is not there yet gets its target made.
+    let dangling = folder.path().join("new.dmx");
+    symlink(kept.join("new.dmx"), &dangling).unwrap();
+    write_atomically(&dangling, false, b"a document").unwrap();
+    assert!(
+        fs::symlink_metadata(&dangling)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(fs::read(kept.join("new.dmx")).unwrap(), b"a document");
+}
