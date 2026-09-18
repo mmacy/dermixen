@@ -154,9 +154,9 @@ pub fn read_text(path: &Path, limit: u64) -> Result<String, ReadError> {
 /// The temporary file is in the folder of the file being replaced, is created
 /// only if nothing has its name, and has a name nobody can predict. A
 /// symbolic link planted at the temporary name is therefore never written
-/// through, which is the name a person never chose and cannot check. A
-/// destination that exists keeps its permissions. A new file gets the
-/// permissions the caller asked for.
+/// through. That name matters because a person never chose it and so cannot
+/// check it. A destination that exists keeps its permissions. A new file gets
+/// the permissions the caller asked for.
 #[derive(Debug)]
 pub struct AtomicFile {
     /// The open temporary file.
@@ -182,7 +182,7 @@ impl AtomicFile {
     /// yet: read and write for the owner alone when it is true, and the
     /// process's default when it is false.
     pub fn create(destination: &Path, private: bool) -> std::io::Result<AtomicFile> {
-        let destination = through_links(destination);
+        let destination = through_links(destination)?;
         let Some(name) = destination.file_name() else {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -266,17 +266,18 @@ pub fn write_atomically(destination: &Path, private: bool, bytes: &[u8]) -> std:
 /// of the chain of symbolic links that starts there.
 ///
 /// A relative link target is read against the folder the link is in, which is
-/// how the operating system reads one. A chain that runs longer than
-/// [`LINKS_FOLLOWED`], which is the case of a link that points back at itself,
-/// ends where the counting stops, and the write then fails on that path rather
-/// than looping.
-fn through_links(destination: &Path) -> PathBuf {
+/// how the operating system reads one. A chain that does not end within
+/// [`LINKS_FOLLOWED`] hops, which is what a link that points back at itself
+/// makes, is an error rather than a write onto the last link in the chain.
+fn through_links(destination: &Path) -> std::io::Result<PathBuf> {
     let mut path = destination.to_path_buf();
-    for _ in 0..LINKS_FOLLOWED {
+    // One read past the last link is what shows that the chain has ended, so
+    // a chain of `LINKS_FOLLOWED` links takes one more read than that.
+    for _ in 0..=LINKS_FOLLOWED {
         // A path that is not a symbolic link, and a path with nothing at it,
         // are both the end of the chain.
         let Ok(target) = std::fs::read_link(&path) else {
-            return path;
+            return Ok(path);
         };
         path = if target.is_absolute() {
             target
@@ -284,7 +285,13 @@ fn through_links(destination: &Path) -> PathBuf {
             folder_of(&path).join(target)
         };
     }
-    path
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        format!(
+            "{} is a symbolic link that does not reach a file within {LINKS_FOLLOWED} links",
+            destination.display()
+        ),
+    ))
 }
 
 /// The folder `path` is in, as a path a file can be made in. A path with no
@@ -361,4 +368,66 @@ fn unpredictable() -> u64 {
     );
     hasher.write_u64(DRAWN.fetch_add(1, Ordering::Relaxed));
     hasher.finish()
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    /// Links `length` names together, the last of them pointing at `target`,
+    /// and gives back the name at the head of the chain.
+    fn chain(folder: &Path, target: &Path, length: u32, name: &str) -> PathBuf {
+        let mut previous = target.to_path_buf();
+        for hop in 0..length {
+            let link = folder.join(format!("{name}-{hop}.dmx"));
+            symlink(&previous, &link).unwrap();
+            previous = link;
+        }
+        previous
+    }
+
+    #[test]
+    fn a_link_that_points_at_itself_is_an_error_rather_than_a_loop() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("set.dmx");
+        symlink(&path, &path).unwrap();
+
+        let error = AtomicFile::create(&path, false).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("set.dmx"), "{error}");
+        // The link is still a link and the folder holds nothing else, so the
+        // refusal wrote nothing and left no temporary file behind.
+        assert!(
+            std::fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(std::fs::read_dir(folder.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn a_chain_of_links_is_followed_to_its_end_and_no_further() {
+        let folder = tempfile::tempdir().unwrap();
+        let target = folder.path().join("target.dmx");
+
+        // A chain of LINKS_FOLLOWED links reaches the file at its end, because
+        // the last hop lands on a file rather than on a further link.
+        let reaches = chain(folder.path(), &target, LINKS_FOLLOWED, "short");
+        write_atomically(&reaches, false, b"a document").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"a document");
+        assert!(
+            std::fs::symlink_metadata(&reaches)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+
+        // One link further is one hop too many.
+        let too_far = chain(folder.path(), &target, LINKS_FOLLOWED + 1, "long");
+        let error = AtomicFile::create(&too_far, false).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(std::fs::read(&target).unwrap(), b"a document");
+    }
 }
