@@ -9,6 +9,7 @@ use dermixen_core::{Anchors, BeatGrid, ContentHash, Mix, Samples, Seconds};
 use serde::Serialize;
 
 use crate::analyze::print_json;
+use crate::text::say;
 
 /// Where one track sits in the mix, as the `mix_show` JSON document holds
 /// it. `mix plan` puts the same fields in each track of its own document,
@@ -137,7 +138,7 @@ pub fn print(layout: &Layout, json: bool) {
         return;
     }
     for track in &layout.tracks {
-        println!(
+        say!(
             "{:>3}  {:<32}  {:>7.2} bpm  {:>+6.1} dB  intro {:>8}  outro {:>8}  {} to {}",
             track.position,
             file_name(Path::new(&track.path)),
@@ -149,7 +150,7 @@ pub fn print(layout: &Layout, json: bool) {
             length_text(Seconds(track.end_seconds)),
         );
     }
-    println!(
+    say!(
         "{} {}, {} long, {} samples",
         layout.tracks.len(),
         if layout.tracks.len() == 1 {

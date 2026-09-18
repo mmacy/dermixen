@@ -1,13 +1,13 @@
 //! The `mix relink` command, which finds a mix's files again after they
 //! have moved.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use dermixen_library::{Relink, relink};
 use serde::Serialize;
 
 use crate::analyze::{canonical, print_json};
+use crate::text::{note, say};
 
 /// What `mix relink --json` prints, which is the `mix_relink` document of
 /// `docs/json/dermixen.schema.json`.
@@ -40,29 +40,6 @@ struct TrackLine {
     reason: Option<String>,
 }
 
-/// Replaces a mix document with new text in one step.
-///
-/// The text is written to a new file beside the document and then moved onto
-/// it, so a write that fails partway leaves the document exactly as it was
-/// rather than truncated. `mix add` rewrites a document the same way, and
-/// `docs/cli.md` says under "mix relink" that `mix relink` rewrites one the
-/// way `mix add` does.
-fn replace(mix: &Path, text: &str) -> Result<(), String> {
-    let mut temporary = mix.as_os_str().to_owned();
-    temporary.push(".new");
-    let temporary = PathBuf::from(temporary);
-    let write = || -> std::io::Result<()> {
-        let mut file = std::fs::File::create(&temporary)?;
-        file.write_all(text.as_bytes())?;
-        file.sync_all()?;
-        std::fs::rename(&temporary, mix)
-    };
-    write().map_err(|problem| {
-        let _ = std::fs::remove_file(&temporary);
-        format!("cannot write {}: {problem}", mix.display())
-    })
-}
-
 /// Carries out `mix relink`, as `docs/cli.md` describes it: every track of
 /// the mix is checked against its file, the ones that are missing or changed
 /// are looked for by hash in the library and then under the folders given,
@@ -82,6 +59,11 @@ fn replace(mix: &Path, text: &str) -> Result<(), String> {
 /// settings file that cannot be read stops every command that opens the
 /// library.
 ///
+/// A track whose path names a folder is read through and looked for like a
+/// track whose file is gone, because a folder is what a person finds where a
+/// file was deleted or where a volume is not mounted, and this command is
+/// the repair for it. Every other command refuses such a document.
+///
 /// The library file is opened only when it is already there. A person who
 /// has never scanned their music, or who names a library file that has not
 /// been built yet, gets a search under the folders alone, and the command
@@ -94,7 +76,7 @@ pub fn run(
     json: bool,
 ) -> Result<(), String> {
     let settings = crate::settings::read()?;
-    let mut document = crate::document::read(mix)?;
+    let mut document = crate::document::read_for_relink(mix)?;
     let location = crate::index::location(library, &settings)?;
     let mut index = match location.exists() {
         true => Some(crate::index::open(&location)?),
@@ -103,7 +85,7 @@ pub fn run(
 
     // Hashing a large library takes minutes, so the command says which file
     // it is reading rather than looking as though it has stopped.
-    let mut progress = |path: &Path| eprintln!("hashing {}", path.display());
+    let mut progress = |path: &Path| note!("hashing {}", path.display());
     let done = relink(&mut document, index.as_mut(), under, &mut progress)
         .map_err(|problem| problem.to_string())?;
 
@@ -153,7 +135,7 @@ pub fn run(
         tracks: lines,
     };
     if report.relinked > 0 {
-        replace(mix, &document.to_json())?;
+        crate::document::replace(mix, &document)?;
     }
 
     if json {
@@ -165,9 +147,11 @@ pub fn run(
                 (_, Some(reason)) => format!("  {reason}"),
                 _ => String::new(),
             };
-            println!(
+            say!(
                 "{:>3}. {:<9}{}{tail}",
-                line.position, line.outcome, line.path
+                line.position,
+                line.outcome,
+                line.path
             );
         }
     }

@@ -9,12 +9,14 @@
 use std::path::Path;
 
 use dermixen_core::Samples;
-use dermixen_media::{Audio, WavDepth, decode, write_wav};
+use dermixen_media::{WavDepth, WavFile, decode};
 use serde::Serialize;
 
 use crate::analyze::print_json;
-use crate::render::{SpanRequest, temporary_beside};
+use crate::paths::refuse_an_input;
+use crate::render::{SpanRequest, writing_to};
 use crate::show::length_text;
+use crate::text::say;
 
 /// The options `decode` takes, as the person typed them.
 pub struct Args<'a> {
@@ -56,11 +58,16 @@ struct Written {
 /// named, a start at or past the end of the file is refused, and a length
 /// that runs past the end is cut there.
 ///
-/// The frames are written to a temporary file beside `args.out` and moved
-/// into place only once the write has finished, so a decode that fails
-/// partway leaves neither the output nor the temporary file behind.
+/// The output is refused when it is the file being decoded, however the two
+/// names are written, since a decode that replaced its own source would lose
+/// the audio it was made from. The frames are then written to a temporary
+/// file beside `args.out` whose name nobody can work out in advance, and
+/// that file is moved into place only once the write has finished, so a
+/// decode that fails partway leaves neither the output nor a temporary file
+/// behind.
 pub fn run(args: &Args<'_>) -> Result<(), String> {
     let span = SpanRequest::read(args.from, args.length)?;
+    refuse_an_input(args.out, "the file being decoded", &[args.file])?;
     let decoded = decode(args.file).map_err(|problem| problem.to_string())?;
     let total = decoded.audio.len();
     let range = span.resolve_within(total, "file")?;
@@ -75,16 +82,18 @@ pub fn run(args: &Args<'_>) -> Result<(), String> {
         .canonicalize()
         .unwrap_or_else(|_| args.file.to_path_buf());
 
-    let temporary = temporary_beside(args.out);
-    let audio = Audio { frames };
-    if let Err(problem) = write_wav(&temporary, &audio, WavDepth::Int16) {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(problem.to_string());
-    }
-    std::fs::rename(&temporary, args.out).map_err(|problem| {
-        let _ = std::fs::remove_file(&temporary);
-        format!("cannot write {}: {problem}", args.out.display())
-    })?;
+    let writing = writing_to(args.out)?;
+    let file = writing
+        .file()
+        .try_clone()
+        .map_err(|problem| format!("cannot write {}: {problem}", args.out.display()))?;
+    let mut wav = WavFile::from_file(file, args.out, WavDepth::Int16)
+        .map_err(|problem| problem.to_string())?;
+    wav.write(&frames).map_err(|problem| problem.to_string())?;
+    wav.finish().map_err(|problem| problem.to_string())?;
+    writing
+        .commit()
+        .map_err(|problem| format!("cannot write {}: {problem}", args.out.display()))?;
 
     let from_seconds = range.start.to_seconds();
     let length_seconds = length.to_seconds();
@@ -97,7 +106,7 @@ pub fn run(args: &Args<'_>) -> Result<(), String> {
             length_seconds: length_seconds.0,
         });
     } else {
-        println!(
+        say!(
             "wrote {}: {} long, {} samples",
             args.out.display(),
             length_text(length_seconds),
