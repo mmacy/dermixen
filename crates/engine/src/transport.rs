@@ -109,15 +109,22 @@ pub struct TransportStatus {
     /// once for every move, and once for every replacement that the check
     /// described on [`replace`](Transport::replace) turns down. A
     /// replacement that passes the check continues the render with the
-    /// state it has, is not counted, and costs no buffering.
+    /// state it has, is not counted, and costs no buffering. A replacement
+    /// of a mix that [`dermixen_core::Mix::check`] refuses is not counted
+    /// either, since the transport keeps the document it already holds and
+    /// the render carries on.
     pub restarts: u64,
-    /// Why the render last started over on a replacement, in a sentence a
-    /// person can read, naming the part of the check that turned the
-    /// replacement down and the numbers behind it, as in `the mix tempo at
-    /// 6:32.1 changed from 135.90 to 135.87`. A replacement that the render
-    /// continues through clears it, so it stands only while the last
-    /// replacement is the one that cost a person the buffering. It is `None`
-    /// before any replacement has been made, and a move by
+    /// Why the last replacement did not take effect as it was given, in a
+    /// sentence a person can read. For a replacement that started the render
+    /// over it names the part of the check on
+    /// [`replace`](Transport::replace) that turned the replacement down and
+    /// the numbers behind it, as in `the mix tempo at 6:32.1 changed from
+    /// 135.90 to 135.87`. For a mix that [`dermixen_core::Mix::check`]
+    /// refuses it is that refusal, naming the field that is out of range,
+    /// and the render carries on with the document the transport already
+    /// holds. A replacement that the render continues through clears it, so
+    /// it stands only while the last replacement is the one it describes. It
+    /// is `None` before any replacement has been made, and a move by
     /// [`seek`](Transport::seek) neither sets nor clears it, since a person
     /// who moves the playhead has asked for the buffering that follows.
     ///
@@ -336,6 +343,10 @@ impl Transport {
     /// without rendering anything; the output is started all the same. An
     /// output that cannot start ends the call with [`RenderError::Output`]
     /// holding its message, and no thread is left running.
+    ///
+    /// A mix that [`dermixen_core::Mix::check`] refuses ends the call with
+    /// [`RenderError::Document`] naming the field that is out of range,
+    /// before the output is touched and before any thread is started.
     pub fn start(
         mix: Mix,
         from: Samples,
@@ -344,6 +355,7 @@ impl Transport {
         mut output: Box<dyn Output>,
         lookahead: Samples,
     ) -> Result<Transport, RenderError> {
+        mix.check().map_err(RenderError::Document)?;
         let length = mix_length(&mix).0;
         let at = from.0.clamp(0, length);
         // The feed holds the lookahead the transport was asked for, but never
@@ -671,9 +683,24 @@ impl Transport {
     /// before it bends the ramp that arrives there, so the transport turns
     /// such a replacement down and starts the render over, which is right,
     /// since the frames before it would have differed.
+    ///
+    /// A mix that [`dermixen_core::Mix::check`] refuses is turned away before
+    /// any of this. The transport goes on playing the document it already
+    /// holds, the render neither takes the new document nor starts over,
+    /// [`TransportStatus::restarts`] does not move, and
+    /// [`TransportStatus::last_restart`] holds the refusal, naming the field
+    /// that is out of range.
     pub fn replace(&mut self, mix: Mix) {
         let status = self.status();
         if matches!(status.state, TransportState::Failed(_)) {
+            return;
+        }
+        // A mix no document may hold has no safe layout, so the transport
+        // keeps the document it already holds and records why this one was
+        // turned away. The render neither takes the new document nor starts
+        // over, because nothing about what the device is playing has changed.
+        if let Err(problem) = mix.check() {
+            *self.last_restart.lock().unwrap() = Some(problem.to_string());
             return;
         }
         let held = status.state == TransportState::Paused;

@@ -1060,7 +1060,6 @@ fn an_output_that_cannot_start_ends_the_preview_with_its_message() {
 }
 
 #[test]
-#[ignore = "engine-guards"]
 fn a_device_is_handed_only_samples_it_can_play() {
     use dermixen_engine::device_sample;
     for (given, handed) in [

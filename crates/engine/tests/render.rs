@@ -819,7 +819,6 @@ fn render_within_five_seconds(mix: Mix, sources: Vec<Audio>) -> Result<Audio, Re
 type Damage = Box<dyn Fn(&mut Mix)>;
 
 #[test]
-#[ignore = "engine-guards"]
 fn a_mix_no_document_may_hold_is_refused_before_anything_is_rendered() {
     let audio = synth::sine(440.0, 0.5, Seconds(2.0));
     let cases: Vec<(&str, Damage)> = vec![
@@ -860,7 +859,6 @@ fn a_mix_no_document_may_hold_is_refused_before_anything_is_rendered() {
 }
 
 #[test]
-#[ignore = "engine-guards"]
 fn a_source_sample_that_is_not_a_number_does_not_reach_the_mix() {
     let clean = synth::sine(440.0, 0.5, Seconds(2.0));
     let mut hostile = clean.clone();

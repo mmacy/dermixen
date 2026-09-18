@@ -111,7 +111,6 @@ fn the_true_peak_sees_between_the_samples() {
 }
 
 #[test]
-#[ignore = "engine-guards"]
 fn audio_that_overflows_the_meter_has_no_loudness() {
     // Sixty-four frames of the largest float overflow the true peak filter,
     // and a gain worked out from an infinite peak cannot be written to a mix.
@@ -129,7 +128,6 @@ fn audio_that_overflows_the_meter_has_no_loudness() {
 }
 
 #[test]
-#[ignore = "engine-guards"]
 fn a_loudness_above_full_scale_is_no_loudness() {
     // A square wave at eight times full scale, which is the most the decoder
     // lets through, measures far above 0 LUFS. No real master does.

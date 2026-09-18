@@ -48,10 +48,10 @@
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use dermixen_core::{BEATS_PER_BAR, BeatGrid, Beats, SAMPLE_RATE, Samples};
+use dermixen_core::{BEATS_PER_BAR, BeatGrid, Beats, Bpm, SAMPLE_RATE, Samples};
 use dermixen_media::{Audio, Frame};
 
-use crate::preview::{Channel, Feed, Output};
+use crate::preview::{Channel, Feed, Output, device_sample};
 use crate::render::BLOCK_FRAMES;
 
 /// How long a click lasts: twenty milliseconds.
@@ -218,14 +218,6 @@ fn playable(sample: f32) -> f32 {
     }
 }
 
-/// A finished sample held within full scale, which is what a device is
-/// handed: a sum above one is one and a sum below minus one is minus one,
-/// so a grid fast enough for its clicks to pile up on one another cannot
-/// clip.
-fn held(sample: f32) -> f32 {
-    sample.clamp(-1.0, 1.0)
-}
-
 /// Makes the `out.len()` frames of the audition from track frame `from` on,
 /// all of them under one setting: the track's frames at [`TRACK_GAIN`] plus
 /// the clicks of `grid` when `metronome` is on, held within full scale.
@@ -263,9 +255,12 @@ fn frames_under(
     }
     // Every click that sounds in these frames has been added by now, because
     // a click begins at or before the frame it sounds in, so the frames are
-    // finished and can be held within full scale.
+    // finished and go through the one function that says what a device is
+    // handed: a sum above one is one and a sum below minus one is minus one,
+    // so a grid fast enough for its clicks to pile up on one another cannot
+    // clip.
     for frame in out.iter_mut() {
-        *frame = [held(frame[0]), held(frame[1])];
+        *frame = [device_sample(frame[0]), device_sample(frame[1])];
     }
 }
 
@@ -359,11 +354,12 @@ impl Audition {
     /// A `from` before the first frame starts at the first frame. The
     /// output is started before this returns, and the audition keeps up to
     /// [`AUDITION_LOOKAHEAD`] frames ready ahead of it from then on. A grid
-    /// whose tempo is not a positive finite number is refused with a
-    /// message saying so, before the output is touched at all; an output
-    /// that cannot start is refused with the output's own message, and is
-    /// not stopped, since it never started. In neither case is anything
-    /// left running.
+    /// whose tempo is outside the range from [`Bpm::LOWEST`] to
+    /// [`Bpm::HIGHEST`] beats per minute, which is the range a document may
+    /// hold, is refused with a message naming the range and the tempo,
+    /// before the output is touched at all. An output that cannot start is
+    /// refused with the output's own message, and is not stopped, since it
+    /// never started. In neither case is anything left running.
     pub fn start(
         audio: Arc<Audio>,
         grid: BeatGrid,
@@ -373,7 +369,9 @@ impl Audition {
     ) -> Result<Audition, String> {
         if !grid.bpm.is_valid() {
             return Err(format!(
-                "a grid whose tempo is {} beats per minute has no beats to click on",
+                "a grid's tempo is from {} to {} beats per minute, and this one is {}",
+                Bpm::LOWEST.0,
+                Bpm::HIGHEST.0,
                 grid.bpm.0
             ));
         }
@@ -438,8 +436,9 @@ impl Audition {
     /// does not wait for the device: it returns within the time it takes
     /// to make one lookahead of frames, so the window may call it on every
     /// move of a drag and on every repeat of a held key. A grid whose
-    /// tempo is not a positive finite number is refused whatever the
-    /// audition's state: nothing changes and nothing is returned. Once the
+    /// tempo is outside the range from [`Bpm::LOWEST`] to [`Bpm::HIGHEST`]
+    /// beats per minute is refused whatever the audition's state: nothing
+    /// changes and nothing is returned. Once the
     /// audition has ended or failed no more frames are made, so the grid
     /// is taken and the returned frame is the position, which after the
     /// end is the track's length.
