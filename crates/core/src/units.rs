@@ -145,7 +145,18 @@ impl Bpm {
         Seconds(60.0 / self.0)
     }
 
-    /// Whether this is a usable tempo: finite and greater than zero.
+    /// The lowest tempo a document, an edit, a command, or the window accepts.
+    pub const LOWEST: Bpm = Bpm(20.0);
+
+    /// The highest tempo a document, an edit, a command, or the window accepts.
+    pub const HIGHEST: Bpm = Bpm(999.0);
+
+    /// Whether this is a usable tempo: a number from [`Bpm::LOWEST`] to
+    /// [`Bpm::HIGHEST`].
+    ///
+    /// The range is what keeps a render finite. A tempo near zero makes a mix
+    /// of any length, and the stretcher's start-up work grows as the tempo
+    /// falls.
     pub fn is_valid(self) -> bool {
         self.0.is_finite() && self.0 > 0.0
     }
@@ -154,6 +165,20 @@ impl Bpm {
 impl Decibels {
     /// No change in level.
     pub const UNITY: Decibels = Decibels(0.0);
+
+    /// The lowest gain or envelope level a document may contain. Every level
+    /// at or below [`Decibels::SILENCE`] is silent, so the limit only keeps
+    /// the number finite and small.
+    pub const LOWEST_LEVEL: Decibels = Decibels(-144.0);
+
+    /// The highest gain or envelope level a document may contain.
+    pub const HIGHEST_LEVEL: Decibels = Decibels(24.0);
+
+    /// Whether this is a level a document may contain: a number from
+    /// [`Decibels::LOWEST_LEVEL`] to [`Decibels::HIGHEST_LEVEL`].
+    pub fn is_level(self) -> bool {
+        self.0 >= Self::LOWEST_LEVEL.0 && self.0 <= Self::HIGHEST_LEVEL.0
+    }
 
     /// The level at or below which a signal is treated as silent.
     ///

@@ -54,3 +54,38 @@ fn a_quiet_track_with_sharp_peaks_stops_at_the_ceiling() {
 fn a_track_at_the_target_with_peaks_at_the_ceiling_is_left_alone() {
     assert_eq!(leveling_gain(Lufs(-14.0), Decibels(-1.0)), Decibels::UNITY);
 }
+
+#[test]
+#[ignore = "document-bounds"]
+fn a_measurement_that_is_not_finite_gets_no_gain() {
+    // A float file can overflow the loudness meter, and a gain that is not a
+    // finite number cannot be written to a document.
+    for (integrated, true_peak) in [
+        (-10.0, f64::INFINITY),
+        (-10.0, f64::NAN),
+        (f64::INFINITY, -1.0),
+        (f64::NAN, -1.0),
+        (f64::NEG_INFINITY, f64::NEG_INFINITY),
+    ] {
+        assert_eq!(
+            leveling_gain(Lufs(integrated), Decibels(true_peak)),
+            Decibels::UNITY,
+            "integrated {integrated}, true peak {true_peak}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "document-bounds"]
+fn the_gain_is_always_a_level_a_document_may_contain() {
+    // Plus 581 LUFS is what the meter reports for samples near 1e30.
+    assert_eq!(
+        leveling_gain(Lufs(581.0), Decibels(590.0)),
+        Decibels::LOWEST_LEVEL
+    );
+    // A track that is almost silent is raised no further than the highest level.
+    assert_eq!(
+        leveling_gain(Lufs(-70.0), Decibels(-60.0)),
+        Decibels::HIGHEST_LEVEL
+    );
+}

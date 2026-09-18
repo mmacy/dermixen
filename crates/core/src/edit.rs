@@ -337,6 +337,10 @@ pub enum EditError {
         /// The beats the transition needs.
         length: Beats,
     },
+    /// The edit would leave a mix that [`Mix::check`] refuses: a beat, a
+    /// tempo, a level, or a length out of range, or a mix too long to render.
+    #[error("{0}")]
+    OutOfRange(crate::mix::MixFileError),
     /// The mix has no tracks, so there is nothing to set a tempo on.
     #[error("the mix has no tracks")]
     EmptyMix,

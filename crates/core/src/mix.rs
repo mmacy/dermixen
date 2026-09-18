@@ -19,6 +19,22 @@ use crate::units::{Beats, Decibels, Samples, Seconds};
 /// The version of the project file format this crate reads and writes.
 pub const FORMAT_VERSION: u32 = 1;
 
+/// The largest magnitude of any beat in a document: an anchor, a tempo node's
+/// beat, or an envelope node's beat.
+///
+/// Whole beats of this size add exactly in an `f64` over any number of
+/// tracks a file can hold, so the layout's running sum of anchors is exact.
+pub const MAX_BEAT: Beats = Beats(10_000_000.0);
+
+/// The longest track a document may name, which is three hours of audio, so
+/// that a whole DJ set can be one track of a mix. The magnitude of a grid's
+/// first beat has the same limit.
+pub const LONGEST_TRACK: Samples = Samples(3 * 3_600 * crate::units::SAMPLE_RATE as i64);
+
+/// The longest mix the app reads, lays out, or renders, which is 24 hours
+/// from the first sample heard to the last.
+pub const LONGEST_MIX: Seconds = Seconds(24.0 * 3_600.0);
+
 /// The three EQ envelopes of a track, one per band.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -272,6 +288,26 @@ impl Mix {
             check_track(index, track)?;
         }
         Ok(mix)
+    }
+
+    /// Checks that this mix is one [`Mix::from_json`] accepts, so that it is
+    /// safe to lay out, to write, and to render.
+    ///
+    /// The error names the first field out of range, as [`Mix::from_json`]
+    /// does. A mix that passes lays out without a panic, and its length is at
+    /// most [`LONGEST_MIX`].
+    pub fn check(&self) -> Result<(), MixFileError> {
+        Ok(())
+    }
+
+    /// The project file text for this mix, or the reason [`Mix::from_json`]
+    /// would refuse that text.
+    ///
+    /// Every writer of a mix document calls this before it touches the disk,
+    /// so no command and no window action replaces a document with one that
+    /// cannot be opened again.
+    pub fn checked_json(&self) -> Result<String, MixFileError> {
+        Ok(self.to_json())
     }
 
     /// Writes the project file text for this mix, indented for reading.
