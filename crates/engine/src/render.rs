@@ -6,7 +6,8 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use dermixen_core::{
-    Decibels, Mix, PlacedTrack, SAMPLE_RATE, Samples, Seconds, TempoCurve, Timeline, Track,
+    Beats, Decibels, MAX_BEAT, Mix, PlacedTrack, SAMPLE_RATE, Samples, Seconds, TempoCurve,
+    Timeline, Track,
 };
 use dermixen_media::{Audio, Frame};
 
@@ -76,6 +77,11 @@ pub enum RenderError {
         /// What the loader said.
         message: String,
     },
+    /// The mix is not one a document may hold, so it has no safe layout: a
+    /// tempo, a beat, a level, or a length is out of range, or the mix is
+    /// longer than the longest mix. [`dermixen_core::Mix::check`] decides.
+    #[error("the mix cannot be rendered: {0}")]
+    Document(dermixen_core::MixFileError),
     /// The sink could not take a block of the mix.
     #[error("the mix could not be written: {0}")]
     Write(String),
@@ -83,6 +89,31 @@ pub enum RenderError {
     /// stopped taking frames before the span had been played.
     #[error("the audio output failed: {0}")]
     Output(String),
+    /// A defect in dermixen stopped a preview: the code filling the feed
+    /// panicked, and the text is what the panic said. Rust prints the panic
+    /// and the line it happened on to standard error as it happens, so this
+    /// tells a person that the preview stopped and where to look rather than
+    /// repeating the whole panic. Only [`play`](crate::play) and a
+    /// [`Transport`](crate::Transport) report this, because a preview that
+    /// stopped without saying so leaves a device playing silence. An offline
+    /// render lets a panic reach its caller.
+    #[error("the preview stopped on a defect in dermixen: {0}")]
+    Defect(String),
+}
+
+/// What a panic said, taken from the value
+/// [`std::panic::catch_unwind`](std::panic::catch_unwind) hands back.
+///
+/// A panic raised by `panic!`, by `assert!`, or by `unwrap` on a failure
+/// carries its message as a string, which is what a person needs to read.
+/// A panic raised with a value of any other type has no message to take, so
+/// the words below stand in its place.
+pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|message| (*message).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "the code rendering the mix panicked".to_owned())
 }
 
 /// Decoded audio a render reads from.
@@ -401,7 +432,16 @@ impl Playing {
 /// source it returns is dropped after the last block that does. A mix of
 /// many tracks therefore needs only the tracks that overlap the current
 /// block in memory at once, which is what lets a ninety-minute mix render
-/// on an ordinary machine. A source whose length differs from the track's
+/// on an ordinary machine.
+///
+/// A mix that [`dermixen_core::Mix::check`] refuses is refused here with
+/// [`RenderError::Document`] naming the field that is out of range, before
+/// the mix is laid out, before a track is loaded, and before a stretcher is
+/// made. A source sample that is not a finite number is read as silence, so
+/// no stretcher, no equalizer, and no sum receives one, and a sample that is
+/// a finite number is passed on unchanged.
+///
+/// A source whose length differs from the track's
 /// declared length is refused with [`RenderError::SourceLength`] when it is
 /// loaded, a loader that fails stops the render with [`RenderError::Load`],
 /// and a sink that fails stops it with [`RenderError::Write`]; in each case
@@ -674,6 +714,12 @@ fn render_blocks(
     progress: &mut dyn FnMut(Progress),
     carry: &mut Carry<'_>,
 ) -> Result<Samples, RenderError> {
+    // A mix no document may hold has no safe layout, so the run refuses it
+    // here, before a track is loaded, a stretcher is made, or the timeline is
+    // worked out. Every entry point that renders a span reaches this
+    // function, so this one check covers all of them.
+    mix.check().map_err(RenderError::Document)?;
+
     let mut held = Held::Lent(mix);
     let Some(mut timeline) = held.mix().timeline() else {
         return Ok(Samples::ZERO);
@@ -754,7 +800,13 @@ fn render_blocks(
         // are thrown away rather than heard, and no boundary follows the last
         // block of the run, so neither is offered as a place to take one.
         let asking_again = (at >= span.start && end < until).then_some(end);
-        if let Some(handover) = carry(asking_again) {
+        // A document that Mix::check refuses has no safe layout, so the run
+        // leaves it and goes on with the document it already holds.
+        // Transport::replace turns such a document away for the same reason
+        // and keeps the document the transport is playing, and a transport is
+        // the only caller that hands a document over, so the two agree.
+        let handover = carry(asking_again).filter(|handover| handover.mix.check().is_ok());
+        if let Some(handover) = handover {
             // A document with no tracks has no timeline and nothing left to
             // render, so the run ends here rather than going on with a
             // document it cannot lay out.
@@ -914,10 +966,58 @@ pub(crate) fn clip(span: &Range<Samples>, length: i64) -> Range<i64> {
 /// the moment the latest track ends. A mix with no tracks has none. This is
 /// the length a span is clipped to, so a command that refuses a start past
 /// the end of the mix measures the end here.
+///
+/// A mix whose values would make [`dermixen_core::Mix::timeline`] reach the
+/// panic its documentation states has none either: this function tests every
+/// tempo, every anchor, and every tempo node's beat first, and answers zero
+/// rather than laying such a mix out. That test is narrower than
+/// [`dermixen_core::Mix::check`], so a mix refused for a value the layout
+/// survives, such as a gain out of range, still has its real length here,
+/// and every entry point of the engine that renders runs the whole of
+/// `Mix::check` and refuses it. A window calls this on every repaint, so the
+/// mix is laid out once here and not again.
 pub fn mix_length(mix: &Mix) -> Samples {
+    if !lays_out(mix) {
+        return Samples::ZERO;
+    }
     Samples(mix.timeline().map_or(0, |timeline| {
         (timeline.end() - timeline.start()).to_samples().0.max(0)
     }))
+}
+
+/// Whether [`dermixen_core::Mix::timeline`] lays this mix out without the
+/// panic its documentation states under "Panics".
+///
+/// Three kinds of value make that layout panic: a tempo the tempo curve
+/// refuses, which is a tempo outside the range from
+/// [`Bpm::LOWEST`](dermixen_core::Bpm::LOWEST) to
+/// [`Bpm::HIGHEST`](dermixen_core::Bpm::HIGHEST), a beat that is not a
+/// finite number, and a running sum of anchors that reaches a number that is
+/// not finite. Testing that every tempo is one
+/// [`Bpm::is_valid`](dermixen_core::Bpm::is_valid) accepts, and that every
+/// anchor and every tempo node's beat is within [`MAX_BEAT`] of zero, rules
+/// out all three: each track moves the running sum by at most twice
+/// [`MAX_BEAT`], so a mix would need more tracks than a machine can hold
+/// before the sum stopped being finite.
+///
+/// This is narrower than [`dermixen_core::Mix::check`], which also bounds a
+/// track's length, a gain, an envelope level, and the length of the whole
+/// mix. A mix that fails only one of those lays out without a panic, so
+/// [`mix_length`] answers its real length. Every entry point of the engine
+/// that renders runs the whole of `Mix::check` and refuses such a mix.
+fn lays_out(mix: &Mix) -> bool {
+    // A comparison against NaN is false, so each test below rules out a beat
+    // that is not a number as well as one that is out of range.
+    let beat_in_range = |beat: Beats| beat.0.abs() <= MAX_BEAT.0;
+    mix.tracks.iter().all(|track| {
+        track.grid.bpm.is_valid()
+            && beat_in_range(track.anchors.intro)
+            && beat_in_range(track.anchors.outro)
+            && track
+                .tempo
+                .iter()
+                .all(|node| beat_in_range(node.at) && node.bpm.is_valid())
+    })
 }
 
 /// Renders a mix to audio held in memory.
@@ -942,6 +1042,10 @@ pub fn mix_length(mix: &Mix) -> Samples {
 /// [`Decibels::SILENCE`], that track adds nothing to the mix whatever its
 /// gain. An empty mix renders to empty audio. The render is deterministic:
 /// the same document and sources always give identical output.
+///
+/// A mix that [`dermixen_core::Mix::check`] refuses is refused with
+/// [`RenderError::Document`], and a source sample that is not a finite number
+/// is read as silence, both as [`render_to`] describes.
 pub fn render(
     mix: &Mix,
     sources: &[Audio],
@@ -953,6 +1057,10 @@ pub fn render(
             sources: sources.len(),
         });
     }
+    // The layout below reads the mix, so the mix is checked before it. The
+    // block loop checks the mix again, which costs one further pass over the
+    // tracks and happens once per render rather than once per block.
+    mix.check().map_err(RenderError::Document)?;
     let mut mixed = Audio::new();
     // Laying the mix out gives the finished length before the first block
     // arrives, so the one buffer this form collects into is allocated once
@@ -974,9 +1082,29 @@ pub fn render(
     Ok(mixed)
 }
 
+/// A source sample as the render reads it: the sample itself when it is a
+/// finite number, and silence when it is not.
+///
+/// One sample that is not finite would otherwise pass into the state a
+/// stretcher keeps and the state an equalizer keeps, and from there into the
+/// sum of every track sounding with it, so a whole passage of the mix would
+/// come out as silence or as a value no device can play. The decoder screens
+/// the audio it produces. This function screens the audio a render reads,
+/// whatever produced that audio.
+fn finite(sample: f32) -> f32 {
+    if sample.is_finite() { sample } else { 0.0 }
+}
+
 /// Fills `input` with the track's frames from `from` up to but not including
 /// `to`, where every position before the track's first sample or after its
-/// last one is silence.
+/// last one is silence, and so is every sample that is not a finite number.
+///
+/// This is the one place a render reads a track's own audio, so screening
+/// the samples here keeps them from every stretcher, every equalizer, and
+/// every sum, and costs one test per sample on the way in rather than one
+/// per sample at each later stage. A sample that is a finite number is
+/// passed on unchanged, so a render of clean audio is the render it was
+/// before.
 fn gather(input: &mut Vec<Frame>, source: &[Frame], from: i64, to: i64) {
     input.clear();
     input.reserve((to - from).max(0) as usize);
@@ -986,7 +1114,7 @@ fn gather(input: &mut Vec<Frame>, source: &[Frame], from: i64, to: i64) {
             .and_then(|index| source.get(index))
             .copied()
             .unwrap_or([0.0, 0.0]);
-        input.push(frame);
+        input.push([finite(frame[0]), finite(frame[1])]);
     }
 }
 
@@ -1155,5 +1283,62 @@ mod tests {
             Some(&None),
             "the last thing the run did was take that frame away"
         );
+    }
+
+    #[test]
+    fn a_mix_that_would_not_lay_out_has_no_length() {
+        let (mix, _) = one_track();
+        let whole = mix_length(&mix);
+        assert!(whole.0 > 0, "the mix this test damages has a length");
+
+        // Every value Mix::timeline names under "Panics", each on its own.
+        type Damage = fn(&mut Mix);
+        let damages: Vec<(&str, Damage)> = vec![
+            ("grid.bpm", |mix| mix.tracks[0].grid.bpm = Bpm(f64::NAN)),
+            ("grid.bpm", |mix| mix.tracks[0].grid.bpm = Bpm(0.0)),
+            ("grid.bpm", |mix| mix.tracks[0].grid.bpm = Bpm(1e-300)),
+            ("anchors.intro", |mix| {
+                mix.tracks[0].anchors.intro = Beats(f64::INFINITY);
+            }),
+            ("anchors.outro", |mix| {
+                mix.tracks[0].anchors.outro = Beats(1e18);
+            }),
+            ("tempo[0].beat", |mix| {
+                mix.tracks[0].tempo.push(TempoNode {
+                    at: Beats(f64::NAN),
+                    bpm: Bpm(130.0),
+                });
+            }),
+            ("tempo[0].bpm", |mix| {
+                mix.tracks[0].tempo.push(TempoNode {
+                    at: Beats(8.0),
+                    bpm: Bpm(f64::INFINITY),
+                });
+            }),
+        ];
+        for (field, damage) in damages {
+            let mut damaged = mix.clone();
+            damage(&mut damaged);
+            assert!(
+                damaged.check().is_err(),
+                "{field}: the document limits accept this value"
+            );
+            assert_eq!(mix_length(&damaged), Samples::ZERO, "{field}");
+        }
+    }
+
+    #[test]
+    fn a_mix_refused_only_for_a_value_the_layout_survives_still_has_a_length() {
+        // A gain far outside the range a document may hold is refused by
+        // Mix::check and changes nothing about where the tracks sit, so the
+        // mix lays out and has the length it had.
+        let (mix, _) = one_track();
+        let mut loud = mix.clone();
+        loud.tracks[0].gain = dermixen_core::Decibels(1e9);
+        assert!(
+            loud.check().is_err(),
+            "the document limits accept this gain"
+        );
+        assert_eq!(mix_length(&loud), mix_length(&mix));
     }
 }

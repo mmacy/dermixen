@@ -1603,3 +1603,37 @@ fn a_track_brought_up_at_a_handover_is_brought_up_from_a_run_in() {
     assert!(after.iter().any(|pull| !pull.frames.is_empty()));
     each_pull_is_the_render(&after, &whole(&pulled_back, &sources));
 }
+
+/// What the loader below panics with, which is the text the transport's
+/// status goes on to report.
+const THE_DEFECT: &str = "a defect in the loader";
+
+#[test]
+fn a_render_thread_that_panics_fails_the_transport_rather_than_going_quiet() {
+    // The panic this test causes is deliberate, so the panic message that
+    // appears on standard error while it runs is what the test is asking
+    // for rather than a sign of a failure.
+    let (mix, _) = two_kicks();
+    let recorder = Recorder::new(Pace::Greedy);
+    let stopped = recorder.stopped();
+    let transport = Transport::start(
+        mix,
+        Samples::ZERO,
+        Box::new(|_, _| panic!("{THE_DEFECT}")),
+        resamplers(),
+        Box::new(recorder),
+        LOOKAHEAD,
+    )
+    .expect("the transport starts");
+    wait_until(
+        &transport,
+        "the transport to report the defect",
+        |status| matches!(&status.state, TransportState::Failed(message) if message.contains(THE_DEFECT)),
+    );
+    let last = transport.stop();
+    match last.state {
+        TransportState::Failed(message) => assert!(message.contains(THE_DEFECT), "{message}"),
+        other => panic!("{other:?}"),
+    }
+    assert!(*stopped.lock().unwrap(), "the output was stopped");
+}

@@ -109,3 +109,36 @@ fn the_true_peak_sees_between_the_samples() {
     let found = measure_loudness(&audio).unwrap();
     assert!(within(found.true_peak.0, -6.02, 0.7), "{found:?}");
 }
+
+#[test]
+fn audio_that_overflows_the_meter_has_no_loudness() {
+    // Sixty-four frames of the largest float overflow the true peak filter,
+    // and a gain worked out from an infinite peak cannot be written to a mix.
+    let mut audio = tone(5.0, Some(-20.0), Some(-20.0));
+    for frame in &mut audio.frames[44_100..44_164] {
+        *frame = [f32::MAX, f32::MAX];
+    }
+    match measure_loudness(&audio) {
+        None => {}
+        Some(loudness) => {
+            assert!(loudness.true_peak.0.is_finite(), "{loudness:?}");
+            assert!(loudness.integrated.0 <= 0.0, "{loudness:?}");
+        }
+    }
+}
+
+#[test]
+fn a_loudness_above_full_scale_is_no_loudness() {
+    // A square wave at eight times full scale, which is the most the decoder
+    // lets through, measures far above 0 LUFS. No real master does.
+    let mut audio = tone(5.0, Some(0.0), Some(0.0));
+    for (n, frame) in audio.frames.iter_mut().enumerate() {
+        let value = if (n / 50) % 2 == 0 { 8.0 } else { -8.0 };
+        *frame = [value, value];
+    }
+    assert_eq!(measure_loudness(&audio), None);
+    // A tone six decibels under full scale in both channels measures near
+    // minus six LUFS, louder than any real master, and still has a loudness.
+    let loud = tone(5.0, Some(-6.0), Some(-6.0));
+    assert!(measure_loudness(&loud).is_some());
+}
