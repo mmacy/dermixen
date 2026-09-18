@@ -53,7 +53,6 @@ fn mode_of(path: &Path) -> u32 {
 }
 
 #[test]
-#[ignore = "cli-hardening"]
 fn no_writing_command_replaces_one_of_its_own_inputs() {
     let dir = tempfile::tempdir().unwrap();
     let dir = dir.path();
@@ -100,7 +99,6 @@ fn no_writing_command_replaces_one_of_its_own_inputs() {
 }
 
 #[test]
-#[ignore = "cli-hardening"]
 fn an_anchor_far_outside_any_mix_is_refused_and_the_document_is_untouched() {
     let dir = tempfile::tempdir().unwrap();
     let dir = dir.path();
@@ -127,7 +125,6 @@ fn an_anchor_far_outside_any_mix_is_refused_and_the_document_is_untouched() {
 }
 
 #[test]
-#[ignore = "cli-hardening"]
 fn a_number_far_outside_any_track_is_refused_and_names_its_option() {
     let dir = tempfile::tempdir().unwrap();
     let dir = dir.path();
@@ -252,7 +249,6 @@ fn a_mix_of_seven_hours(dir: &Path) {
 }
 
 #[test]
-#[ignore = "cli-hardening"]
 fn a_mix_too_long_for_a_wav_file_is_refused_before_anything_is_written() {
     let dir = tempfile::tempdir().unwrap();
     let dir = dir.path();
@@ -279,7 +275,6 @@ fn a_mix_too_long_for_a_wav_file_is_refused_before_anything_is_written() {
 }
 
 #[test]
-#[ignore = "cli-hardening"]
 fn a_path_that_names_a_device_is_an_error_at_once() {
     let dir = tempfile::tempdir().unwrap();
     let dir = dir.path();
@@ -318,7 +313,6 @@ fn a_path_that_names_a_device_is_an_error_at_once() {
 }
 
 #[test]
-#[ignore = "cli-hardening"]
 fn a_document_over_the_size_limit_is_refused_by_size() {
     let dir = tempfile::tempdir().unwrap();
     let dir = dir.path();
@@ -331,7 +325,6 @@ fn a_document_over_the_size_limit_is_refused_by_size() {
 }
 
 #[test]
-#[ignore = "cli-hardening"]
 fn a_link_planted_where_a_temporary_file_went_is_not_written_through() {
     let dir = tempfile::tempdir().unwrap();
     let dir = dir.path();
@@ -379,7 +372,6 @@ fn a_link_planted_where_a_temporary_file_went_is_not_written_through() {
 }
 
 #[test]
-#[ignore = "cli-hardening"]
 fn an_edit_keeps_the_permissions_of_the_document() {
     let dir = tempfile::tempdir().unwrap();
     let dir = dir.path();
@@ -400,7 +392,6 @@ fn an_edit_keeps_the_permissions_of_the_document() {
 }
 
 #[test]
-#[ignore = "cli-hardening"]
 fn text_from_a_file_cannot_drive_the_terminal() {
     let dir = tempfile::tempdir().unwrap();
     let dir = dir.path();

@@ -19,6 +19,7 @@ use dermixen_analysis::{
 use dermixen_core::Bpm;
 
 use crate::analyze::print_json;
+use crate::text::note;
 
 /// The tempo the fixed-tempo analyzer answers with. It is a baseline rather
 /// than an estimate: it shows what guessing one common tempo scores.
@@ -599,10 +600,10 @@ pub fn run(dir: &Path, giantsteps: bool, json: bool) -> Result<(), String> {
     let truth = beat_truth(dir, giantsteps)?;
     let anchors = anchor_truth(dir, giantsteps)?;
     for path in &anchors.without_audio {
-        eprintln!("warning: no audio beside {}", path.display());
+        note!("warning: no audio beside {}", path.display());
     }
     for warning in &anchors.warnings {
-        eprintln!("warning: {warning}");
+        note!("warning: {warning}");
     }
     if truth.is_empty() && anchors.tracks.is_empty() {
         return Err(format!("{} holds no annotated audio", dir.display()));
@@ -625,7 +626,7 @@ pub fn run(dir: &Path, giantsteps: bool, json: bool) -> Result<(), String> {
     let mut beats = None;
     let mut keys = None;
     if !truth.is_empty() {
-        eprintln!(
+        note!(
             "running {} beat analyzers over {} annotated tracks",
             beat_analyzers.len(),
             truth.len()
@@ -650,7 +651,7 @@ pub fn run(dir: &Path, giantsteps: bool, json: bool) -> Result<(), String> {
     let mut grids = None;
     let mut phrases = None;
     if !anchors.tracks.is_empty() {
-        eprintln!(
+        note!(
             "running {} anchor analyzers over {} labeled tracks",
             anchor_analyzers.len(),
             anchors.tracks.len()
@@ -659,7 +660,7 @@ pub fn run(dir: &Path, giantsteps: bool, json: bool) -> Result<(), String> {
             run_anchors(&anchors.tracks, &anchor_analyzers)
                 .map_err(|problem| problem.to_string())?,
         );
-        eprintln!(
+        note!(
             "running {} beat analyzers over the {} labeled grids",
             beat_analyzers.len(),
             anchors.tracks.len()
@@ -667,7 +668,7 @@ pub fn run(dir: &Path, giantsteps: bool, json: bool) -> Result<(), String> {
         grids = Some(
             run_grids(&anchors.tracks, &beat_analyzers).map_err(|problem| problem.to_string())?,
         );
-        eprintln!(
+        note!(
             "running {} phrase analyzers over the {} labeled tracks",
             phrase_analyzers.len(),
             anchors.tracks.len()

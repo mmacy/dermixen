@@ -2,18 +2,23 @@
 //! the default audio device by the same path `render` writes a file.
 
 use std::num::NonZeroU32;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use dermixen_core::Seconds;
+use dermixen_core::files::AtomicFile;
 use dermixen_engine::{Feed, Output, Progress, play};
 use dermixen_media::{Frame, WavDepth, WavFile};
 use serde::Serialize;
 
 use crate::analyze::print_json;
-use crate::render::{SpanRequest, check_hashes, decoder, mix_length, stretchers, temporary_beside};
+use crate::render::{
+    SpanRequest, check_hashes, decoder, mix_length, refuse_a_mix_too_long_for_a_wav,
+    refuse_the_mix_and_its_tracks, span_frames, stretchers, writing_to,
+};
 use crate::show::length_text;
+use crate::text::{note, say};
 
 /// How much of the mix the engine keeps rendered ahead of the device.
 ///
@@ -81,10 +86,10 @@ impl CaptureOutput {
         }
     }
 
-    /// Completes the captured file and moves it from `temporary` onto `out`,
-    /// so a capture that failed partway leaves nothing where the person
-    /// asked for the file.
-    fn finish(self, temporary: &Path, out: &Path) -> Result<(), String> {
+    /// Completes the captured file and moves `writing` onto `out`, so a
+    /// capture that failed partway leaves nothing where the person asked for
+    /// the file.
+    fn finish(self, writing: AtomicFile, out: &Path) -> Result<(), String> {
         let file = match (self.outcome, self.file) {
             // The pulling thread ran and handed the file back.
             (Some(Ok(file)), _) => file,
@@ -98,7 +103,8 @@ impl CaptureOutput {
             }
         };
         file.finish().map_err(|problem| problem.to_string())?;
-        std::fs::rename(temporary, out)
+        writing
+            .commit()
             .map_err(|problem| format!("cannot write {}: {problem}", out.display()))
     }
 }
@@ -227,7 +233,10 @@ fn underrun_text(underruns: u64) -> String {
 
 /// Carries out the `play` command as `docs/cli.md` describes it.
 ///
-/// Every track's file is hashed first, as `render` does. The span `from`
+/// A `capture` file that is the mix document or one of its tracks is
+/// refused, and so is a capture of a span too long for a WAV file, both
+/// before anything is created and in the words `render` refuses them. Every
+/// track's file is then hashed, as `render` does. The span `from`
 /// and `length` select is then played through the default audio device,
 /// or, with `capture`, written to that WAV file instead, and one line on
 /// standard output, or the `play` JSON document, reports what was played
@@ -245,19 +254,28 @@ pub fn run(
     let settings = crate::settings::read()?;
     let span = SpanRequest::read(from, length)?;
     let document = crate::document::read(mix)?;
+    if let Some(out) = capture {
+        refuse_the_mix_and_its_tracks(out, mix, &document)?;
+    }
     let total = mix_length(&document);
     let span = span.resolve(total)?;
+    if let Some(out) = capture {
+        refuse_a_mix_too_long_for_a_wav(out, span_frames(&span, total))?;
+    }
     // The span is checked and the files hashed before any device is opened,
     // so a mistaken span costs nothing but the message that says so.
     check_hashes(&document.tracks, mix)?;
 
-    let temporary: Option<PathBuf> = capture.map(temporary_beside);
-    let mut destination = match &temporary {
-        Some(path) => {
-            let file = WavFile::create(path, WavDepth::Int16).map_err(|problem| {
-                let _ = std::fs::remove_file(path);
-                problem.to_string()
-            })?;
+    let writing = capture.map(writing_to).transpose()?;
+    let mut destination = match &writing {
+        Some(writing) => {
+            let out = capture.expect("a capture file is open only when one was asked for");
+            let file = writing
+                .file()
+                .try_clone()
+                .map_err(|problem| format!("cannot write {}: {problem}", out.display()))?;
+            let file = WavFile::from_file(file, out, WavDepth::Int16)
+                .map_err(|problem| problem.to_string())?;
             Destination::File(Box::new(CaptureOutput::new(file)))
         }
         None => device(settings.audio_buffer_frames)?,
@@ -272,7 +290,7 @@ pub fn run(
     let mut next_report = span.start;
     let mut progress = |progress: Progress| {
         if progress.written >= next_report {
-            eprintln!(
+            note!(
                 "played {} of {}",
                 length_text(progress.written.to_seconds()),
                 length_text(progress.total.to_seconds())
@@ -291,21 +309,12 @@ pub fn run(
         LOOKAHEAD.to_samples(),
         &mut progress,
     );
-    let report = match played {
-        Ok(report) => report,
-        Err(problem) => {
-            if let Some(path) = &temporary {
-                let _ = std::fs::remove_file(path);
-            }
-            return Err(problem.to_string());
-        }
-    };
-    if let (Destination::File(written), Some(temporary), Some(out)) =
-        (destination, &temporary, capture)
+    // The temporary capture file is removed when `writing` is dropped, so a
+    // preview that fails leaves nothing where the person asked for the file.
+    let report = played.map_err(|problem| problem.to_string())?;
+    if let (Destination::File(written), Some(writing), Some(out)) = (destination, writing, capture)
     {
-        written.finish(temporary, out).inspect_err(|_| {
-            let _ = std::fs::remove_file(temporary);
-        })?;
+        written.finish(writing, out)?;
     }
 
     let seconds = report.played.to_seconds();
@@ -324,7 +333,7 @@ pub fn run(
             Some(path) => format!(", wrote {}", path.display()),
             None => String::new(),
         };
-        println!(
+        say!(
             "played {} from {} of {}, {}{}",
             length_text(seconds),
             length_text(from_samples.to_seconds()),

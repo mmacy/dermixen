@@ -585,3 +585,41 @@ fn a_scan_with_no_folder_scans_the_music_folder_the_setting_names() {
         "the JSON report names the music folder as the root that was scanned"
     );
 }
+
+/// The library names every audio file a person owns, so a folder the command
+/// makes to hold the library file is for its owner alone, and a folder that
+/// is already there keeps the permissions it has.
+#[test]
+#[cfg(unix)]
+fn a_folder_the_command_makes_for_the_library_is_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let music = dir.path().join("music");
+    kicks_file(&music, "Etnica - Alpha.wav", 130.0, 0.5);
+    let mode_of = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+
+    let made = dir.path().join("newfolder");
+    let library = made.join("library.sqlite");
+    ok(&dermixen(
+        dir.path(),
+        &[("DERMIXEN_LIBRARY_FILE", library.to_str().unwrap())],
+        &["library", "scan", "music"],
+    ));
+    assert!(library.exists());
+    assert_eq!(mode_of(&made), 0o700);
+
+    // A folder that is already there keeps the permissions it has.
+    let chosen = dir.path().join("chosen");
+    std::fs::create_dir(&chosen).unwrap();
+    std::fs::set_permissions(&chosen, std::fs::Permissions::from_mode(0o755)).unwrap();
+    ok(&dermixen(
+        dir.path(),
+        &[(
+            "DERMIXEN_LIBRARY_FILE",
+            chosen.join("library.sqlite").to_str().unwrap(),
+        )],
+        &["library", "scan", "music"],
+    ));
+    assert_eq!(mode_of(&chosen), 0o755);
+}

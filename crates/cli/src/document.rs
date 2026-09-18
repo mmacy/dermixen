@@ -4,51 +4,87 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use dermixen_core::files::{LARGEST_DOCUMENT, read_text, write_atomically};
 use dermixen_core::{
-    Anchor, Anchors, Beats, Decibels, Edit, EditError, Envelope, EqEnvelopes, Mix, Preset,
-    Settings, Track, apply, apply_edit, clear_incoming, clear_outgoing, fits_between_the_anchors,
-    leveling_gain, outro_for, span_of,
+    Anchor, Anchors, Beats, Decibels, Edit, EditError, Envelope, EqEnvelopes, MAX_BEAT, Mix,
+    Preset, Settings, Track, apply, apply_edit, clear_incoming, clear_outgoing,
+    fits_between_the_anchors, leveling_gain, outro_for, span_of,
 };
 use dermixen_library::TrackRecord;
 use dermixen_media::hash_file;
 
 use crate::analyze;
 use crate::analyzers::Given;
+use crate::text::{note, say};
 
 /// The four transition presets, named as `--preset` takes them.
 const PRESET_NAMES: &str = "blend, beatmix, bass-swap, and cut";
 
 /// Reads a mix document, naming the file if it cannot be read or is not a
 /// valid document.
+///
+/// The text comes through [`read_text`], so the command reads a mix document
+/// only from a regular file of at most [`LARGEST_DOCUMENT`] bytes and never
+/// from a device or a named pipe. [`Mix::from_json`] then holds every number
+/// in the document to the limits `DESIGN.md` states, so the mix this returns
+/// is one the layout and the render can take as it stands.
 pub fn read(mix: &Path) -> Result<Mix, String> {
-    let text = std::fs::read_to_string(mix)
-        .map_err(|problem| format!("cannot read {}: {problem}", mix.display()))?;
-    Mix::from_json(&text).map_err(|problem| problem.to_string())
+    let text = read_text(mix, LARGEST_DOCUMENT).map_err(|problem| problem.to_string())?;
+    let document =
+        Mix::from_json(&text).map_err(|problem| format!("{}: {problem}", mix.display()))?;
+    check_track_paths(mix, &document)?;
+    Ok(document)
 }
 
-/// Replaces a mix document with new text in one step.
+/// Refuses a document whose track names something that is not an audio file.
 ///
-/// The text is written to a new file beside the document and then moved onto
-/// it, so a write that fails partway leaves the document exactly as it was
-/// rather than truncated.
-fn replace(mix: &Path, text: &str) -> Result<(), String> {
-    let mut temporary = mix.as_os_str().to_owned();
-    temporary.push(".new");
-    let temporary = PathBuf::from(temporary);
-    let write = || -> std::io::Result<()> {
-        let mut file = std::fs::File::create(&temporary)?;
-        file.write_all(text.as_bytes())?;
-        file.sync_all()?;
-        std::fs::rename(&temporary, mix)
-    };
-    write().map_err(|problem| {
-        let _ = std::fs::remove_file(&temporary);
-        format!("cannot write {}: {problem}", mix.display())
-    })
+/// A track path with nothing at it is left alone, because a file that has
+/// moved or is on a volume that is not mounted is what `mix relink` is for.
+/// A path that names a folder, a device, or a named pipe is different: no
+/// command wrote it, reading one never gives audio, and reading a device
+/// never ends, so the document is refused as soon as it is read rather than
+/// at the moment some command reaches that path.
+fn check_track_paths(mix: &Path, document: &Mix) -> Result<(), String> {
+    for (index, track) in document.tracks.iter().enumerate() {
+        let Ok(data) = std::fs::metadata(&track.path) else {
+            continue;
+        };
+        if !data.file_type().is_file() {
+            return Err(format!(
+                "track {} of {} names {}, which is not a regular file. A track of a mix is an audio file.",
+                index + 1,
+                mix.display(),
+                track.path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Replaces a mix document with the text for `document` in one step.
+///
+/// The text comes from [`Mix::checked_json`], so a mix that could not be
+/// opened again is refused before the disk is touched. The write goes
+/// through [`write_atomically`], which writes a temporary file nobody can
+/// name in advance and moves it onto the document, so a write that fails
+/// partway leaves the document exactly as it was and an edit keeps the
+/// permissions the document had.
+pub fn replace(mix: &Path, document: &Mix) -> Result<(), String> {
+    let text = document.checked_json().map_err(|problem| {
+        format!(
+            "{} is left as it was: the change would make a document dermixen cannot open again: {problem}",
+            mix.display()
+        )
+    })?;
+    write_atomically(mix, false, text.as_bytes())
+        .map_err(|problem| format!("cannot write {}: {problem}", mix.display()))
 }
 
 /// Carries out `mix new`, refusing to replace a document that is already there.
 pub fn new(mix: &Path, json: bool) -> Result<(), String> {
+    let text = Mix::new()
+        .checked_json()
+        .map_err(|problem| format!("cannot write {}: {problem}", mix.display()))?;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -63,7 +99,7 @@ pub fn new(mix: &Path, json: bool) -> Result<(), String> {
                 format!("cannot write {}: {problem}", mix.display())
             }
         })?;
-    file.write_all(Mix::new().to_json().as_bytes())
+    file.write_all(text.as_bytes())
         .map_err(|problem| format!("cannot write {}: {problem}", mix.display()))?;
 
     #[derive(serde::Serialize)]
@@ -75,14 +111,21 @@ pub fn new(mix: &Path, json: bool) -> Result<(), String> {
             path: mix.display().to_string(),
         });
     } else {
-        println!("wrote {}", mix.display());
+        say!("wrote {}", mix.display());
     }
     Ok(())
 }
 
-/// Reads an anchor that a person gave, refusing one that is not a whole beat.
+/// Reads an anchor that a person gave, refusing one that is not a whole beat
+/// and one outside the beats a mix document holds.
 fn whole_beat(option: &str, beat: f64) -> Result<Beats, String> {
     let beat = Beats(beat);
+    if !beat.0.is_finite() || beat.0.abs() > MAX_BEAT.0 {
+        return Err(format!(
+            "{option} must be a beat of the track from -{} to {}, not {}",
+            MAX_BEAT.0, MAX_BEAT.0, beat.0
+        ));
+    }
     if !beat.is_whole() {
         return Err(format!(
             "{option} must be a whole beat of the track, not {}",
@@ -134,22 +177,33 @@ fn settle_anchors(
     Ok(Anchors { intro, outro })
 }
 
-/// Reads the gain a person gave, refusing one that is not a finite number.
-/// `named` is what the message calls the value: `--gain` for `mix add`,
-/// where that is the flag the person typed, and `the gain` for
-/// `mix set-gain`, whose value is a bare number.
+/// Reads the gain a person gave, refusing one that is not a finite number
+/// and one outside the gains a mix document holds. `named` is what the
+/// message calls the value: `--gain` for `mix add`, where that is the flag
+/// the person typed, and `the gain` for `mix set-gain`, whose value is a
+/// bare number.
 ///
 /// clap reads `nan` and `inf` as `f64` values, and the render multiplies
 /// every sample of the track by the gain, so a gain that is not finite would
-/// turn the whole track into NaN or infinity in the rendered file. The
-/// command turns such a value down here instead.
+/// turn the whole track into NaN or infinity in the rendered file. The range
+/// is the one `DESIGN.md` states under "Limits", which
+/// [`Decibels::is_level`] holds a value to, so a gain the command takes is
+/// one the document keeps.
 fn given_gain(named: &str, db: f64) -> Result<Decibels, String> {
     if !db.is_finite() {
         return Err(format!(
             "{named} {db} is not a number of decibels. Give a finite number, like -3.5"
         ));
     }
-    Ok(Decibels(db))
+    let gain = Decibels(db);
+    if !gain.is_level() {
+        return Err(format!(
+            "{named} {db} is outside the gains a mix document holds, which run from {} to {} decibels",
+            Decibels::LOWEST_LEVEL.0,
+            Decibels::HIGHEST_LEVEL.0
+        ));
+    }
+    Ok(gain)
 }
 
 /// The message that refuses a track number the playlist does not have,
@@ -172,7 +226,8 @@ pub fn no_such_track(mix: &Path, track: usize, held: usize) -> String {
 ///
 /// A record with no loudness is one stored without a loudness measurement,
 /// or one for a track the meter finds nothing in, which is one quieter than
-/// the meter's gate, shorter than its block, or silent.
+/// the meter's gate, shorter than its block, silent, or measuring above
+/// 0 LUFS, which no real master does.
 /// Such a record gives a gain of zero. The command says so on standard error,
 /// because a track sitting at its own level among leveled tracks is worth
 /// knowing about, and the two cases have different remedies: a scan of the
@@ -182,8 +237,8 @@ fn leveling_for(record: &TrackRecord) -> Decibels {
     match record.loudness {
         Some(loudness) => leveling_gain(loudness.integrated, loudness.true_peak),
         None => {
-            eprintln!(
-                "warning: the library has no loudness for {}, so its gain is +0.0 dB rather than the leveling gain. Scanning its folder with dermixen library scan measures a track whose record has no loudness. A track the meter finds nothing in (a track quieter than the meter's gate, shorter than its block, or silent) keeps a gain of +0.0 dB.",
+            note!(
+                "warning: the library has no loudness for {}, so its gain is +0.0 dB rather than the leveling gain. Scanning its folder with dermixen library scan measures a track whose record has no loudness. A track the meter finds nothing in (a track quieter than the meter's gate, shorter than its block, silent, or measuring above 0 LUFS, which no real master does) keeps a gain of +0.0 dB.",
                 record.path.display()
             );
             Decibels::UNITY
@@ -474,7 +529,7 @@ pub fn add(args: &AddArgs<'_>) -> Result<(), String> {
         },
     )?;
     join(&mut document, at, track, preset)?;
-    replace(args.mix, &document.to_json())?;
+    replace(args.mix, &document)?;
     crate::show::print(&crate::show::layout(args.mix, &document), args.json);
     Ok(())
 }
@@ -549,7 +604,7 @@ pub fn move_anchor(
         )
         .map_err(|problem| problem.to_string())?;
     }
-    replace(mix, &document.to_json())?;
+    replace(mix, &document)?;
     crate::show::print(&crate::show::layout(mix, &document), json);
     Ok(())
 }
@@ -569,7 +624,7 @@ pub fn set_gain(mix: &Path, track: usize, db: f64, json: bool) -> Result<(), Str
         return Err(no_such_track(mix, track, held));
     }
     document.tracks[track - 1].gain = gain;
-    replace(mix, &document.to_json())?;
+    replace(mix, &document)?;
     crate::show::print(&crate::show::layout(mix, &document), json);
     Ok(())
 }

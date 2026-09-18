@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use dermixen_analysis::Camelot;
+use dermixen_core::files::{LARGEST_SETTINGS, read_text};
 use dermixen_core::{DEFAULT_BARS, Mix, Seconds};
 use dermixen_library::{Index, Query, TrackRecord};
 use dermixen_media::hash_file;
@@ -19,6 +20,7 @@ use serde::Serialize;
 use crate::analyzers::Given;
 use crate::document::{self, TrackOptions};
 use crate::show::{self, TrackLine};
+use crate::text::{note, say};
 
 /// The lowest median key confidence at which the plan checks keys.
 ///
@@ -107,9 +109,12 @@ fn checked_max_step(bpm: f64) -> Result<f64, String> {
 ///
 /// A blank line is skipped, and a relative path is resolved against the
 /// folder the command runs in, as every path a command takes is.
+///
+/// The playlist comes through [`read_text`], so it is read only from a
+/// regular file of at most [`LARGEST_SETTINGS`] bytes, which is the limit
+/// `DESIGN.md` states for a playlist as well as for a settings file.
 fn read_playlist(playlist: &Path) -> Result<Vec<PathBuf>, String> {
-    let text = std::fs::read_to_string(playlist)
-        .map_err(|problem| format!("cannot read {}: {problem}", playlist.display()))?;
+    let text = read_text(playlist, LARGEST_SETTINGS).map_err(|problem| problem.to_string())?;
     let mut files = Vec::new();
     for line in text.lines() {
         let named = line.trim();
@@ -416,7 +421,7 @@ fn warnings(
 /// of tracks, the length of the mix, and the tempo it opens and closes at.
 fn print(plan: &Plan) {
     for track in &plan.tracks {
-        println!(
+        say!(
             "{:>3}  {:<3}  {:>7.2} bpm  {:>6}  enters {:>7}  {} - {}",
             track.placed.position,
             track
@@ -436,7 +441,7 @@ fn print(plan: &Plan) {
     let opening = plan.tracks.first().map(|track| track.placed.grid.bpm.0);
     let closing = plan.tracks.last().map(|track| track.placed.grid.bpm.0);
     if let (Some(opening), Some(closing)) = (opening, closing) {
-        println!(
+        say!(
             "{} {}, {} long, opening at {opening:.2} bpm and closing at {closing:.2} bpm",
             plan.tracks.len(),
             if plan.tracks.len() == 1 {
@@ -504,11 +509,11 @@ pub fn run(args: &PlanArgs<'_>) -> Result<(), String> {
         tracks,
     };
 
-    if let Some(note) = &keys.note {
-        eprintln!("note: {note}");
+    if let Some(message) = &keys.note {
+        note!("note: {message}");
     }
     for warning in &plan.warnings {
-        eprintln!("warning: {warning}");
+        note!("warning: {warning}");
     }
     if args.json {
         crate::analyze::print_json(&plan);

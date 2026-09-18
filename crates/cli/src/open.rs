@@ -16,6 +16,7 @@ use std::process::{Command, Stdio};
 use serde::Serialize;
 
 use crate::analyze::{canonical, print_json};
+use crate::text::say;
 
 /// The environment variable that names the window's executable, which
 /// takes precedence over the one beside this command's own executable. An
@@ -110,7 +111,7 @@ pub fn run(mix: &Path, json: bool) -> Result<(), String> {
             pid,
         });
     } else {
-        println!(
+        say!(
             "opened {} in {} (pid {pid})",
             absolute.display(),
             app.display()

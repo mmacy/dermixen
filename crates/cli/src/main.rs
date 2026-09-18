@@ -18,6 +18,7 @@ mod document;
 mod index;
 mod library;
 mod open;
+mod paths;
 mod plan;
 mod play;
 mod relink;
@@ -25,8 +26,10 @@ mod render;
 mod scoreboard;
 mod settings;
 mod show;
+mod text;
 
 use analyzers::Given;
+use text::note;
 
 /// Dermixen authors continuous DJ mixes from analyzed tracks.
 #[derive(Parser, Debug)]
@@ -370,15 +373,53 @@ enum MixCommand {
     },
 }
 
+/// The exit code a defect in dermixen itself ends the command with, which
+/// `docs/cli.md` lists beside the others.
+const DEFECT: u8 = 3;
+
+/// Runs one command and reports what happened as an exit code.
+///
+/// A defect in dermixen itself is an exit code of its own rather than a
+/// backtrace and whatever code the runtime chooses. The hook prints one line
+/// beginning `error:` that says the command met a defect and names the file
+/// and line it happened at, the unwind is caught here, and the command ends
+/// with [`DEFECT`]. A person reading the terminal, or an agent reading the
+/// exit code, can tell a defect from input dermixen refused, which ends with
+/// code 1.
 fn main() -> ExitCode {
+    std::panic::set_hook(Box::new(|panic| {
+        let place = match panic.location() {
+            Some(location) => format!("{}, line {}", location.file(), location.line()),
+            None => "a place it cannot name".to_owned(),
+        };
+        note!(
+            "error: dermixen met a defect in itself at {place} and stopped: {}. Nothing this command had not already written has been written. Please report this.",
+            defect_message(panic)
+        );
+    }));
     let cli = Cli::parse();
-    match run(cli.command) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(message) => {
-            eprintln!("error: {message}");
+    match std::panic::catch_unwind(|| run(cli.command)) {
+        Ok(Ok(())) => ExitCode::SUCCESS,
+        Ok(Err(message)) => {
+            note!("error: {message}");
             ExitCode::from(1)
         }
+        // The hook above has already printed the line, so this only decides
+        // the exit code.
+        Err(_) => ExitCode::from(DEFECT),
     }
+}
+
+/// What a panic said, for the one line the hook prints.
+fn defect_message(panic: &std::panic::PanicHookInfo<'_>) -> String {
+    let said = panic.payload();
+    if let Some(text) = said.downcast_ref::<&str>() {
+        return (*text).to_owned();
+    }
+    if let Some(text) = said.downcast_ref::<String>() {
+        return text.clone();
+    }
+    "no message".to_owned()
 }
 
 /// Carries out one command, returning the message to print on failure.

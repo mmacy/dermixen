@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use dermixen_library::{TrackRecord, analyze_file};
 
+use crate::text::say;
+
 use crate::analyzers::{Chosen, Given};
 
 /// A file's path as the mix documents and the library record it, which is
@@ -31,7 +33,7 @@ pub fn record_of(file: &Path, given: &Given) -> Result<TrackRecord, String> {
 /// Twenty columns is one more than the longest field name this command
 /// prints, so every name keeps at least one space before its value.
 fn field(name: &str, value: &str) {
-    println!("{name:<20}{value}");
+    say!("{name:<20}{value}");
 }
 
 /// A value that may be absent, written as a dash when it is.
