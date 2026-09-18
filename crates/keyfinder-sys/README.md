@@ -4,7 +4,9 @@ libkeyfinder, the key detection library used as the scoreboard baseline for musi
 
 Dermixen uses libkeyfinder as the baseline row on the key scoreboard. The row is the score a bespoke key detector has to beat before that bespoke detector is worth shipping. libkeyfinder is also the key detector the library uses to tag tracks, and it stays that detector until a bespoke one beats it on the scoreboard.
 
-The crates that make up the app itself forbid unsafe code, and calling into a C++ library needs it, so all of the risk of these calls sits in `src/lib.rs`, which is short enough to read in one sitting. The other two crates that allow unsafe code are `crates/signalsmith-sys` for the time-stretcher and `crates/aubio-sys` for the beat tracker.
+The crates that make up the app itself forbid unsafe code, and calling into a C++ library needs it, so all of the risk of these calls sits in `src/lib.rs`, which is short enough to read in one sitting. Four crates allow unsafe code: this one, `crates/signalsmith-sys` for the time-stretcher, `crates/aubio-sys` for the beat tracker, and `crates/macos-documents-sys` for the documents macOS asks the app to open.
+
+Both functions `src/lib.rs` offers check the sample rate before they reach the C++. `key_of_audio` fails, and `frame_samples` answers zero, for a rate outside 8,000 to 384,000 samples per second, because libkeyfinder works out how far to downsample a track from the rate and divides by the result.
 
 ## What is vendored
 

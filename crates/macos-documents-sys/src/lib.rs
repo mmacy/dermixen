@@ -1,5 +1,3 @@
-#![allow(unsafe_code)]
-
 //! The documents macOS asks the app to open, handed to the window as paths.
 //!
 //! When a person double-clicks a `.dmx` file in the Finder, or drops one on
@@ -15,9 +13,10 @@
 //!
 //! The crates that make up the app itself forbid unsafe code, so the calls
 //! into the Objective-C runtime sit here, in a file short enough to read in
-//! one sitting. The other three crates that allow unsafe code are the
-//! wrappers around the time-stretcher, the beat tracker, and the key
-//! detector.
+//! one sitting. Four crates allow unsafe code: `signalsmith-sys` around the
+//! time-stretcher, `aubio-sys` around the beat tracker, `keyfinder-sys` around
+//! the key detector, and `macos-documents-sys` around the documents macOS asks
+//! the app to open.
 
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
@@ -199,8 +198,12 @@ mod apple_events {
 
     /// The path a file URL names, or nothing for a URL of any other scheme.
     /// The path of `https://example.com/x.dmx` is `/x.dmx`, which names a
-    /// file nobody asked the app to open.
+    /// file nobody asked the app to open, so a URL that is not a file URL is
+    /// turned away before its path is read.
     pub(crate) fn path_of_url(url: &NSURL) -> Option<PathBuf> {
+        if !url.isFileURL() {
+            return None;
+        }
         let path = url.path()?;
         Some(PathBuf::from(path.to_string()))
     }
@@ -287,7 +290,6 @@ mod apple_events {
         }
 
         #[test]
-        #[ignore = "wrapper-limits"]
         fn a_url_of_another_scheme_names_no_path() {
             for text in ["https://example.com/x.dmx", "ftp://example.com/etc/passwd"] {
                 let url = NSURL::URLWithString(&NSString::from_str(text)).unwrap();

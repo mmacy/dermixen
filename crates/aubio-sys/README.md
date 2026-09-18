@@ -4,7 +4,7 @@ The beat and tempo tracker from the aubio library, vendored as C and made callab
 
 Dermixen uses aubio as the baseline row on the analyzer scoreboard. The row is the score a bespoke beat tracker has to beat before that bespoke tracker is worth shipping, and aubio is the tracker the rest of Dermixen leans on until a bespoke one beats it.
 
-The crates that make up the app itself forbid unsafe code, and calling into a C library needs it, so all of the risk of these calls sits in `src/lib.rs`, which is short enough to read in one sitting.
+The crates that make up the app itself forbid unsafe code, and calling into a C library needs it, so all of the risk of these calls sits in `src/lib.rs`, which is short enough to read in one sitting. Four crates allow unsafe code: this one, `crates/signalsmith-sys` for the time-stretcher, `crates/keyfinder-sys` for the key detector, and `crates/macos-documents-sys` for the documents macOS asks the app to open.
 
 ## What is vendored
 
@@ -23,3 +23,5 @@ aubio is under the GNU General Public License version 3, and `vendor/aubio/COPYI
 `src/lib.rs` wraps aubio's tempo object in one type, `Tempo`. A caller creates a `Tempo`, pushes a track through that `Tempo` one block of mono samples at a time, and gets back the position of each beat aubio hears, along with the tempo aubio settled on and how confident aubio is in that tempo. aubio's confidence is a ratio with no upper limit, so `Tempo` clamps the figure into the range from zero to one before handing it over. Nothing else from aubio is exposed, because nothing else is called.
 
 `Tempo` holds a pointer into memory aubio allocated, frees that memory when the `Tempo` is dropped, and never hands the pointer out, so safe Rust has no way to misuse the pointer.
+
+`Tempo::new` checks its settings before it reaches aubio. It hands back nothing for a sample rate outside 8,000 to 384,000 samples per second, and for a rate and a hop whose ratio would send aubio into a loop that never ends: aubio works out how many steps of analysis cover about six seconds of audio, as 5.8 times the rate divided by the hop, and rounds that count up to a power of two by doubling a 32-bit number until it reaches the count. A count above two thousand million makes the doubling wrap to zero and keeps doubling zero.

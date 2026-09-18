@@ -4,6 +4,13 @@
 //! tracking reaches, compiles it, and wraps the handful of C functions that
 //! drive it in one Rust type, [`Tempo`]. The crates that make up the app itself
 //! forbid unsafe code, so all of the risk of these calls sits in this file.
+//! Four crates allow unsafe code: `signalsmith-sys` around the time-stretcher,
+//! `aubio-sys` around the beat tracker, `keyfinder-sys` around the key
+//! detector, and `macos-documents-sys` around the documents macOS asks the app
+//! to open.
+//!
+//! Every safe function here checks what it is given before it reaches the C, so
+//! no value a caller can write reaches aubio outside the range aubio handles.
 //!
 //! Feed a track through [`Tempo`] one hop at a time, in order, from the start.
 //! Each hop is a block of mono samples of exactly the size given to
@@ -56,6 +63,24 @@ pub struct Tempo {
     fed: usize,
 }
 
+/// The lowest sample rate [`Tempo::new`] accepts, in samples per second, which
+/// is the lowest rate audio is recorded at.
+const LOWEST_SAMPLE_RATE: u32 = 8_000;
+
+/// The highest sample rate [`Tempo::new`] accepts, in samples per second, which
+/// is the highest rate audio is recorded at.
+const HIGHEST_SAMPLE_RATE: u32 = 384_000;
+
+/// The largest count of analysis steps [`Tempo::new`] passes on to aubio, which
+/// is two to the power of thirty-one.
+///
+/// aubio counts how many steps of analysis cover about six seconds of audio, as
+/// 5.8 times the sample rate divided by the hop, and rounds that count up to a
+/// power of two by doubling a 32-bit number until it reaches the count. Above
+/// this figure the doubling passes the largest 32-bit number, wraps to zero,
+/// and doubles zero for as long as the program runs.
+const MOST_OBSERVATIONS: f64 = 2_147_483_648.0;
+
 impl Tempo {
     /// Starts a beat tracker.
     ///
@@ -63,20 +88,44 @@ impl Tempo {
     /// step and `hop` is how far it moves between steps, so `hop` samples of
     /// new audio arrive each step and the rest of the window is audio it has
     /// already seen. `window` must be at least two samples and at least as
-    /// large as `hop`, and `sample_rate` must not be zero.
+    /// large as `hop`, `hop` must be at least one sample, and `sample_rate`
+    /// must be from 8,000 to 384,000 samples per second, which spans the rates
+    /// audio is recorded at.
     ///
-    /// Returns `None` when aubio rejects those settings or cannot allocate its
-    /// working buffers. aubio prints the reason on standard error when it
-    /// rejects them.
+    /// Returns `None` for a sample rate outside that range, and for a rate and
+    /// a hop whose ratio would send aubio into a loop that never ends. aubio
+    /// works out how many steps of analysis cover about six seconds of audio,
+    /// as 5.8 times the rate divided by the hop, and rounds that count up to a
+    /// power of two by doubling a 32-bit number until it reaches the count. A
+    /// count above two thousand million makes the doubling wrap to zero and
+    /// keeps doubling zero, so this function turns such a pair away before
+    /// aubio sees it. Both checks answer at once, without calling aubio.
+    ///
+    /// Returns `None` as well when aubio rejects the three sizes or cannot
+    /// allocate its working buffers. aubio prints the reason on standard error
+    /// when it rejects them.
     pub fn new(window: usize, hop: usize, sample_rate: u32) -> Option<Tempo> {
+        if !(LOWEST_SAMPLE_RATE..=HIGHEST_SAMPLE_RATE).contains(&sample_rate) {
+            return None;
+        }
+        // A hop of zero divides by zero here, which gives a count of infinity,
+        // or of nothing that is a number at all when the sample rate is zero
+        // as well. The check below turns away each of those two counts along
+        // with every count too large for aubio's doubling.
+        let observations = 5.8 * f64::from(sample_rate) / hop as f64;
+        if !observations.is_finite() || observations > MOST_OBSERVATIONS {
+            return None;
+        }
         let window = c_uint::try_from(window).ok()?;
         let hop_size = c_uint::try_from(hop).ok()?;
         // "default" is the name aubio gives its own recommended settings,
         // which measure how much the spectrum changed since the last window.
         let method = c"default";
         // Safety: the method name is a null-terminated string that outlives
-        // the call, and aubio checks the three sizes itself and answers with a
-        // null pointer rather than misbehaving when it dislikes them.
+        // the call. The sample rate and the ratio of the rate to the hop are
+        // inside the limits stated above, so aubio's own rounding to a power of
+        // two finishes. aubio checks the three sizes against each other itself
+        // and answers with a null pointer when it dislikes them.
         let tracker = unsafe { new_aubio_tempo(method.as_ptr(), window, hop_size, sample_rate) };
         Some(Tempo {
             tracker: NonNull::new(tracker)?,
@@ -260,7 +309,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "wrapper-limits"]
     fn a_sample_rate_aubio_would_loop_on_gives_no_tracker_at_once() {
         // aubio rounds the ratio of the rate to the hop up to a power of two
         // in a 32-bit number, and loops without end once that number wraps.

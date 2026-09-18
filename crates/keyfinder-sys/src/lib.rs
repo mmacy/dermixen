@@ -1,5 +1,3 @@
-#![allow(unsafe_code)]
-
 //! libkeyfinder, the key detection library, made callable from Rust.
 //!
 //! libkeyfinder is a C++ library. Its source is vendored under
@@ -11,9 +9,14 @@
 //!
 //! The crates that make up the app itself forbid unsafe code, so all of the
 //! risk of calling into this C++ sits here, in a file short enough to read in
-//! one sitting. The other three crates that allow unsafe code are the
-//! wrappers around the time-stretcher, the beat tracker, and the documents
-//! macOS asks the app to open.
+//! one sitting. Four crates allow unsafe code: `signalsmith-sys` around the
+//! time-stretcher, `aubio-sys` around the beat tracker, `keyfinder-sys` around
+//! the key detector, and `macos-documents-sys` around the documents macOS asks
+//! the app to open.
+//!
+//! Every safe function here checks what it is given before it reaches the C++,
+//! so no value a caller can write reaches libkeyfinder outside the range
+//! libkeyfinder handles.
 //!
 //! libkeyfinder normally works out its spectra with FFTW, a library that would
 //! have to be installed on every machine Dermixen builds on. In its place this
@@ -112,11 +115,32 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-/// The lowest sample rate [`key_of_audio`] accepts, in samples per second.
+/// The lowest sample rate [`key_of_audio`] and [`frame_samples`] accept, in
+/// samples per second.
+///
+/// This is the lowest rate audio is recorded at. libkeyfinder decides how far
+/// to downsample a track by dividing half the sample rate by the highest
+/// frequency it looks for, and then takes the remainder of the sample count
+/// against that figure. At 4,347 samples per second or less the figure comes
+/// out at zero, and the remainder divides by zero, which ends the process on
+/// the spot.
 pub const LOWEST_SAMPLE_RATE: u32 = 8_000;
 
-/// The highest sample rate [`key_of_audio`] accepts, in samples per second.
+/// The highest sample rate [`key_of_audio`] and [`frame_samples`] accept, in
+/// samples per second.
+///
+/// This is the highest rate audio is recorded at. libkeyfinder turns the rate
+/// away only when it is zero, and works every other size it uses out from the
+/// rate without checking any of them, so this wrapper keeps the rate inside
+/// the range libkeyfinder was written for.
 pub const HIGHEST_SAMPLE_RATE: u32 = 384_000;
+
+/// Whether `sample_rate` is one of the rates this crate passes to
+/// libkeyfinder, which is a rate from [`LOWEST_SAMPLE_RATE`] to
+/// [`HIGHEST_SAMPLE_RATE`].
+fn sample_rate_is_usable(sample_rate: u32) -> bool {
+    (LOWEST_SAMPLE_RATE..=HIGHEST_SAMPLE_RATE).contains(&sample_rate)
+}
 
 /// How many samples at `sample_rate` fill one of the frames libkeyfinder works
 /// a spectrum out from. At the rate Dermixen works at this is a little under
@@ -132,6 +156,9 @@ pub const HIGHEST_SAMPLE_RATE: u32 = 384_000;
 /// The answer is zero for a rate outside [`LOWEST_SAMPLE_RATE`] to
 /// [`HIGHEST_SAMPLE_RATE`], which [`key_of_audio`] refuses.
 pub fn frame_samples(sample_rate: u32) -> usize {
+    if !sample_rate_is_usable(sample_rate) {
+        return 0;
+    }
     // Safety: this only reads two constants out of the C++ library and does
     // arithmetic on them, touching no memory the caller owns.
     unsafe { dermixen_keyfinder_frame_samples(sample_rate as c_uint) }
@@ -168,10 +195,12 @@ pub fn frame_samples(sample_rate: u32) -> usize {
 /// includes a track longer than the roughly twenty-seven hours libkeyfinder's
 /// own sample counter reaches and a track holding a sample that is not a
 /// finite number. A sample rate outside [`LOWEST_SAMPLE_RATE`] to
-/// [`HIGHEST_SAMPLE_RATE`] is also [`Error::Failed`], with a reason that
-/// names the sample rate, and it never reaches libkeyfinder, which divides by
-/// a figure it works out from the rate and reads outside its buffers when the
-/// rate is very large.
+/// [`HIGHEST_SAMPLE_RATE`] is also [`Error::Failed`], with a reason that names
+/// the sample rate, and that rate never reaches libkeyfinder. libkeyfinder
+/// works out how far to downsample a track from the rate and then takes the
+/// remainder of the sample count against that figure, and at a rate of 4,347
+/// samples per second or less the figure is zero, so the remainder divides by
+/// zero and ends the process on the spot.
 pub fn key_of_audio(samples: &[f32], sample_rate: u32) -> Result<Analysis, Error> {
     // libkeyfinder builds its tone profiles the first time an analysis asks
     // for them, without guarding that first build against a second thread
@@ -184,6 +213,12 @@ pub fn key_of_audio(samples: &[f32], sample_rate: u32) -> Result<Analysis, Error
     // point.
     PREPARED.call_once(|| unsafe { dermixen_keyfinder_prepare() });
 
+    if !sample_rate_is_usable(sample_rate) {
+        return Err(Error::Failed(format!(
+            "the sample rate {sample_rate} is outside the range libkeyfinder works at, which is \
+             {LOWEST_SAMPLE_RATE} to {HIGHEST_SAMPLE_RATE} samples per second"
+        )));
+    }
     if samples.is_empty() {
         return Err(Error::Silence);
     }
@@ -393,7 +428,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "wrapper-limits"]
     fn a_sample_rate_libkeyfinder_cannot_work_at_is_refused() {
         let second = vec![0.25_f32; 44_100];
         for rate in [

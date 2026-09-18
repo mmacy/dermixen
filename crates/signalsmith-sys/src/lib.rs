@@ -10,8 +10,14 @@
 //!
 //! The crates that make up the app itself forbid unsafe code, so the risk of
 //! calling into this C++ sits here, in about a hundred lines that can be read
-//! in one sitting. The only other crate that allows unsafe code is the aubio
-//! wrapper, which does the same job for the beat tracker.
+//! in one sitting. Four crates allow unsafe code: `signalsmith-sys` around the
+//! time-stretcher, `aubio-sys` around the beat tracker, `keyfinder-sys` around
+//! the key detector, and `macos-documents-sys` around the documents macOS asks
+//! the app to open.
+//!
+//! Every safe function here checks what it is given before it reaches the C++,
+//! so no value a caller can write reaches the library outside the range the
+//! library handles.
 //!
 //! The vendored library and the digital signal processing headers it includes
 //! are both under the MIT license, and the two `LICENSE.txt` files that state
@@ -27,10 +33,13 @@ struct Opaque {
     _private: [u8; 0],
 }
 
+/// The status the C++ side answers with when the call finished.
+const STATUS_OK: c_int = 0;
+
 unsafe extern "C" {
     fn dermixen_signalsmith_new(channels: c_int, sample_rate: f32, seed: c_long) -> *mut Opaque;
     fn dermixen_signalsmith_free(stretcher: *mut Opaque);
-    fn dermixen_signalsmith_reset(stretcher: *mut Opaque);
+    fn dermixen_signalsmith_reset(stretcher: *mut Opaque) -> c_int;
     fn dermixen_signalsmith_input_latency(stretcher: *const Opaque) -> c_int;
     fn dermixen_signalsmith_output_latency(stretcher: *const Opaque) -> c_int;
     fn dermixen_signalsmith_process(
@@ -39,7 +48,7 @@ unsafe extern "C" {
         input_frames: c_int,
         output: *mut f32,
         output_frames: c_int,
-    );
+    ) -> c_int;
 }
 
 /// One stretcher, which changes the speed of audio without moving its pitch.
@@ -53,12 +62,28 @@ pub struct Stretch {
 }
 
 /// The lowest sample rate [`Stretch::new`] accepts, in samples per second.
+///
+/// This is the lowest rate audio is recorded at. The library works out the
+/// window it analyzes, and the interval between one window and the next, from
+/// the sample rate, and holds each as a whole number of samples. A rate below
+/// thirty-four samples per second leaves the interval at zero, which the
+/// library divides by and steps a loop by.
 pub const LOWEST_SAMPLE_RATE: f32 = 8_000.0;
 
 /// The highest sample rate [`Stretch::new`] accepts, in samples per second.
+///
+/// This is the highest rate audio is recorded at. The library turns twelve
+/// hundredths of the sample rate into a window length held in a C `int`, and
+/// that conversion is undefined for a rate above about eighteen thousand
+/// million samples per second.
 pub const HIGHEST_SAMPLE_RATE: f32 = 384_000.0;
 
 /// The most channels [`Stretch::new`] accepts.
+///
+/// Dermixen stretches stereo audio, so it asks for two. Eight leaves room for
+/// surround material, and a caller that asks for more has made a mistake,
+/// which this limit catches before the library allocates a buffer for every
+/// channel.
 pub const MOST_CHANNELS: usize = 8;
 
 impl Stretch {
@@ -73,19 +98,29 @@ impl Stretch {
     /// and for a sample rate that is not a number from [`LOWEST_SAMPLE_RATE`]
     /// to [`HIGHEST_SAMPLE_RATE`]. The library sizes its buffers from the
     /// rate without checking it, so a rate outside that range must never
-    /// reach the library.
+    /// reach the library. A sample rate that is not a number, and a sample
+    /// rate of infinity, fail that comparison as well. `None` also comes back
+    /// for a seed outside the range of the C type the seed is passed as, which
+    /// on macOS and Linux is the whole of [`i64`].
     ///
     /// # Panics
     ///
-    /// Panics if `channels` is zero, if `channels` or `seed` is too large for
-    /// the C types they are passed as, or if the C++ side returns nothing.
+    /// Panics if the C++ side returns nothing, which it does when it cannot
+    /// allocate the library object and the buffers around it.
     pub fn new(channels: usize, sample_rate: f32, seed: i64) -> Option<Self> {
-        assert!(channels > 0, "a stretcher is built for one channel or more");
-        let count = c_int::try_from(channels).expect("the channel count fits in a C int");
-        let seed = c_long::try_from(seed).expect("the seed fits in a C long");
-        // SAFETY: the C++ side allocates the object and returns the only
-        // pointer to it. Every later call passes that same pointer back, and
-        // the `Drop` below frees it exactly once.
+        if channels == 0 || channels > MOST_CHANNELS {
+            return None;
+        }
+        if !(LOWEST_SAMPLE_RATE..=HIGHEST_SAMPLE_RATE).contains(&sample_rate) {
+            return None;
+        }
+        let count = c_int::try_from(channels).ok()?;
+        let seed = c_long::try_from(seed).ok()?;
+        // SAFETY: the channel count and the sample rate are inside the limits
+        // stated above, so the library can size its buffers from them. The C++
+        // side allocates the object and returns the only pointer to it. Every
+        // later call passes that same pointer back, and the `Drop` below frees
+        // it exactly once.
         let stretcher = unsafe { dermixen_signalsmith_new(count, sample_rate, seed) };
         assert!(
             !stretcher.is_null(),
@@ -121,9 +156,19 @@ impl Stretch {
 
     /// Forgets the audio fed so far, putting the stretcher back into the state
     /// it was created in.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the C++ side cannot build the library object again, which it
+    /// reports when it runs out of memory. The stretcher then holds the audio
+    /// it held before the call, so a panic here never leaves it half reset.
     pub fn reset(&mut self) {
         // SAFETY: the pointer is the one `new` returns and this value still owns it.
-        unsafe { dermixen_signalsmith_reset(self.stretcher) };
+        let status = unsafe { dermixen_signalsmith_reset(self.stretcher) };
+        assert_eq!(
+            status, STATUS_OK,
+            "the C++ side could not build the stretcher again"
+        );
     }
 
     /// Takes all of `input` and fills all of `output`, playing the input at
@@ -133,10 +178,16 @@ impl Stretch {
     /// Both slices hold interleaved samples: one sample per channel per frame,
     /// in channel order.
     ///
+    /// Each slice holds at most [`c_int::MAX`] frames, because the C++ side
+    /// takes the two frame counts as C `int` values. The number of samples in
+    /// a slice has no such limit: the C++ side counts sample positions inside
+    /// a block in a type that spans any slice Rust can hand it.
+    ///
     /// # Panics
     ///
-    /// Panics if either slice is not a whole number of frames, or if either
-    /// frame count is too large for the C type it is passed as.
+    /// Panics if either slice is not a whole number of frames, if either frame
+    /// count is above [`c_int::MAX`], or if the C++ side cannot allocate the
+    /// buffers it separates the channels into.
     pub fn process(&mut self, input: &[f32], output: &mut [f32]) {
         let input_frames = self.frames(input.len(), "input");
         let output_frames = self.frames(output.len(), "output");
@@ -145,15 +196,16 @@ impl Stretch {
         // because those counts are their own lengths divided by the channel
         // count, and the two slices cannot overlap because one is a shared
         // borrow and the other an exclusive one.
-        unsafe {
+        let status = unsafe {
             dermixen_signalsmith_process(
                 self.stretcher,
                 input.as_ptr(),
                 input_frames,
                 output.as_mut_ptr(),
                 output_frames,
-            );
-        }
+            )
+        };
+        assert_eq!(status, STATUS_OK, "the C++ side could not stretch a block");
     }
 
     /// The number of frames in `samples` interleaved samples, as the C type the
@@ -251,7 +303,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "wrapper-limits"]
     fn a_sample_rate_the_library_cannot_size_its_buffers_from_is_refused() {
         for rate in [
             0.0,
@@ -272,7 +323,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "wrapper-limits"]
     fn a_channel_count_outside_the_limit_is_refused_and_nothing_aborts() {
         for channels in [0, MOST_CHANNELS + 1, 1_000_000, usize::MAX] {
             assert!(
