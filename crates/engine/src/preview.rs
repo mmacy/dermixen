@@ -720,6 +720,14 @@ impl Feed {
     }
 }
 
+/// A sample as an audio device is handed it: silence for a sample that is
+/// not a finite number, and otherwise the sample held within full scale, so
+/// that no device receives a value it cannot play. A rendered file is held
+/// within full scale the same way when it is written.
+pub fn device_sample(sample: f32) -> f32 {
+    sample
+}
+
 /// An audio device, or anything standing in for one, that plays a
 /// [`Feed`] on its own thread.
 pub trait Output {

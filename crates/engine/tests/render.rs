@@ -804,3 +804,86 @@ mod streaming {
         );
     }
 }
+
+/// Runs a render on a thread and panics when it has not answered in five
+/// seconds, so that a render that never ends fails the test.
+fn render_within_five_seconds(mix: Mix, sources: Vec<Audio>) -> Result<Audio, RenderError> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || sender.send(render(&mix, &sources, &mut resamplers())));
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("the render did not return within five seconds")
+}
+
+/// A change that takes one number of a mix out of its range.
+type Damage = Box<dyn Fn(&mut Mix)>;
+
+#[test]
+#[ignore = "engine-guards"]
+fn a_mix_no_document_may_hold_is_refused_before_anything_is_rendered() {
+    let audio = synth::sine(440.0, 0.5, Seconds(2.0));
+    let cases: Vec<(&str, Damage)> = vec![
+        (
+            "tracks[0].tempo[0].bpm",
+            Box::new(|mix| mix.tracks[0].tempo[0].bpm = Bpm(1e-300)),
+        ),
+        (
+            "tracks[0].tempo[0].bpm",
+            Box::new(|mix| mix.tracks[0].tempo[0].bpm = Bpm(1e12)),
+        ),
+        (
+            "tracks[1].grid.bpm",
+            Box::new(|mix| mix.tracks[1].grid.bpm = Bpm(1e-6)),
+        ),
+        (
+            "tracks[0].anchors.outro_beat",
+            Box::new(|mix| mix.tracks[0].anchors.outro = Beats(1e18)),
+        ),
+        (
+            "tracks[1].gain_db",
+            Box::new(|mix| mix.tracks[1].gain = Decibels(f64::NAN)),
+        ),
+    ];
+    for (field, damage) in cases {
+        let mut mix = Mix {
+            tracks: vec![
+                track(&audio, 120.0, 0.0, 2.0, &[(0.0, 120.0)]),
+                track(&audio, 120.0, 0.0, 4.0, &[]),
+            ],
+        };
+        damage(&mut mix);
+        match render_within_five_seconds(mix, vec![audio.clone(), audio.clone()]) {
+            Err(RenderError::Document(problem)) => assert_eq!(problem.field, field),
+            other => panic!("{field}: {:?}", other.map(|audio| audio.len())),
+        }
+    }
+}
+
+#[test]
+#[ignore = "engine-guards"]
+fn a_source_sample_that_is_not_a_number_does_not_reach_the_mix() {
+    let clean = synth::sine(440.0, 0.5, Seconds(2.0));
+    let mut hostile = clean.clone();
+    hostile.frames[10_000] = [f32::NAN, f32::INFINITY];
+    hostile.frames[20_000] = [f32::NEG_INFINITY, 1e30];
+    // Both tracks sound together from the first frame to the last.
+    let mix = Mix {
+        tracks: vec![
+            track(&hostile, 120.0, 0.0, 0.0, &[]),
+            track(&clean, 120.0, 0.0, 4.0, &[]),
+        ],
+    };
+    let rendered = render(&mix, &[hostile, clean.clone()], &mut resamplers()).unwrap();
+    assert!(
+        rendered
+            .frames
+            .iter()
+            .all(|frame| frame[0].is_finite() && frame[1].is_finite()),
+        "a frame of the mix is not a finite number"
+    );
+    // The second track is heard through the whole overlap, the damaged frames included.
+    for at in [9_000, 10_000, 20_000, 30_000] {
+        let window = &rendered.frames[at..at + 4_410];
+        assert!(rms(window) > 0.2, "the mix is silent near frame {at}");
+    }
+}

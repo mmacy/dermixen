@@ -76,6 +76,11 @@ pub enum RenderError {
         /// What the loader said.
         message: String,
     },
+    /// The mix is not one a document may hold, so it has no safe layout: a
+    /// tempo, a beat, a level, or a length is out of range, or the mix is
+    /// longer than the longest mix. [`dermixen_core::Mix::check`] decides.
+    #[error("the mix cannot be rendered: {0}")]
+    Document(dermixen_core::MixFileError),
     /// The sink could not take a block of the mix.
     #[error("the mix could not be written: {0}")]
     Write(String),
