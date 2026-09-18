@@ -6,12 +6,12 @@ The app is a Cargo workspace, and one command builds both executables. Three ven
 
 On macOS:
 
-- Rust 1.95 or newer. `rustup update stable` brings a toolchain up to date.
+- `rust-toolchain.toml` names the toolchain the workspace builds with, and `rustup` installs it on the first cargo command. The window needs at least Rust 1.95, because it is built on `eframe` 0.36.
 - The Xcode command line tools, which provide the C and C++ compiler and `make`. `xcode-select --install` installs them.
 
 On Linux:
 
-- Rust 1.95 or newer.
+- `rust-toolchain.toml` names the toolchain the workspace builds with, and `rustup` installs it on the first cargo command. The window needs at least Rust 1.95, because it is built on `eframe` 0.36.
 - A C and C++ compiler and `make`, like the `build-essential` package on Debian and Ubuntu.
 - The ALSA development headers, which the build needs for audio output: `libasound2-dev` on Debian and Ubuntu.
 
