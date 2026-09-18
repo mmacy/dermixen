@@ -16,10 +16,10 @@ fn main() {
         .std("c++17")
         .include("vendor/signalsmith-stretch")
         .file("src/shim.cpp")
-        // Neither the shim nor Signalsmith Stretch raises a C++ exception, and
-        // an exception unwinding into Rust would be undefined behavior, so
-        // exceptions are turned off outright.
-        .flag("-fno-exceptions")
+        // Signalsmith Stretch allocates its buffers, and so does the shim, so
+        // both can throw. Exceptions stay on and `src/shim.cpp` catches every
+        // one at the boundary, because an exception unwinding into a Rust
+        // frame would be undefined behavior.
         // Stretching is heavy arithmetic. Building it unoptimized would make a
         // debug render slow enough to be unusable, so it is optimized whatever
         // the surrounding Rust build is doing.
@@ -95,8 +95,15 @@ fn compiles_a_standard_header(build: &cc::Build) -> bool {
 
 /// Where the C++ standard library headers live inside the macOS software
 /// development kit, if they are there.
+///
+/// The tool that reports the development kit is named by its full path, so
+/// that the build runs Apple's own `xcrun` and not another program of that
+/// name that happens to sit earlier in the `PATH`.
 fn development_kit_cxx_headers() -> Option<PathBuf> {
-    let output = Command::new("xcrun").arg("--show-sdk-path").output().ok()?;
+    let output = Command::new("/usr/bin/xcrun")
+        .arg("--show-sdk-path")
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }

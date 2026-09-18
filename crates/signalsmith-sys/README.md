@@ -2,7 +2,9 @@
 
 Signalsmith Stretch, the pitch-preserving time-stretcher behind Dermixen's keylock, vendored as C++ and made callable from Rust.
 
-The crates that make up the app itself forbid unsafe code, so the risk of calling into this C++ sits in `src/lib.rs`, which is short enough to read in one sitting. The other crates that allow unsafe code are `crates/aubio-sys`, which does the same job for the beat tracker, and `crates/keyfinder-sys`, which does it for the key detector.
+The crates that make up the app itself forbid unsafe code, so the risk of calling into this C++ sits in `src/lib.rs`, which is short enough to read in one sitting. Four crates allow unsafe code: this one, `crates/aubio-sys` for the beat tracker, `crates/keyfinder-sys` for the key detector, and `crates/macos-documents-sys` for the documents macOS asks the app to open.
+
+Every function `src/lib.rs` offers checks what it is given before it reaches the C++. `Stretch::new` hands back nothing for a channel count of zero or above eight, and for a sample rate that is not a number from 8,000 to 384,000 samples per second, because the library sizes its window and the interval between its windows from the rate without checking either figure.
 
 ## What is vendored
 
@@ -16,6 +18,10 @@ Both are under the MIT license. Each keeps its own `LICENSE.txt` beside the head
 ## How the build works
 
 `build.rs` compiles one file, `src/shim.cpp`, with the `cc` crate. Signalsmith Stretch is a C++ class template, which Rust cannot call, so the shim instantiates that template for 32-bit float samples and exposes the six operations the render graph needs as plain C functions. Audio crosses that boundary interleaved, one left sample then one right sample, because that is the layout the rest of Dermixen uses; the shim separates the channels on the way in and puts them back together on the way out.
+
+The shim counts sample positions inside a block in `std::size_t`, which spans any slice Rust can hand across. The frame counts cross as C `int` values, so a block of two thousand million frames of stereo audio holds more samples than an `int` counts.
+
+The C++ is compiled with exceptions turned on, because the library and the shim both allocate and an allocation can throw. None of those exceptions reaches Rust: every function in `src/shim.cpp` catches everything at the boundary and reports the failure in the value it answers with, so nothing ever unwinds out of C++ and into Rust.
 
 The stretcher is built with a fixed random seed, so rendering the same mix twice gives the same audio both times.
 

@@ -10,8 +10,20 @@
 // sample and so on, because that is the layout the rest of Dermixen uses.
 // Signalsmith Stretch reads one array per channel, so this file separates the
 // channels on the way in and puts them back together on the way out.
+//
+// The library and the buffers around it allocate, so both can throw, and a C++
+// exception unwinding into a Rust frame is undefined behavior. Every function
+// below catches everything and reports a failure in its own answer instead.
+//
+// Positions inside a block are counted in `std::size_t`, which spans any slice
+// Rust can hand across. The frame counts arrive as C `int` values, so a block
+// of two thousand million frames of stereo audio holds more samples than an
+// `int` counts, and multiplying a frame number by the channel count in an
+// `int` would overflow.
 
+#include <cstddef>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "signalsmith-stretch.h"
@@ -19,6 +31,11 @@
 namespace {
 /// Signalsmith Stretch instantiated for the 32-bit float samples Dermixen uses.
 using Library = signalsmith::stretch::SignalsmithStretch<float>;
+
+/// The call finished.
+const int STATUS_OK = 0;
+/// The call raised a C++ exception, which this file caught.
+const int STATUS_FAILED = 1;
 } // namespace
 
 /// One stretcher: the library object, the buffers used to separate and
@@ -44,19 +61,28 @@ struct DermixenSignalsmithStretch {
     /// Builds the library object from scratch, at the size the default preset
     /// chooses for this sample rate. The seed is the same every time, so two
     /// renders of the same mix produce the same audio.
+    ///
+    /// The new object is configured before it takes the place of the old one,
+    /// so a failure part of the way through leaves the stretcher holding the
+    /// object it held before, which is one whose buffers all match each other.
     void build() {
-        library.reset(new Library(seed));
-        library->presetDefault(channels, sampleRate);
+        std::unique_ptr<Library> built(new Library(seed));
+        built->presetDefault(channels, sampleRate);
+        library = std::move(built);
     }
 
     void process(const float *input, int inputFrames, float *output, int outputFrames) {
+        const std::size_t channelCount = (std::size_t)channels;
         // A block with no frames on one side or the other is turned away here
         // rather than passed on, because an empty vector yields a pointer that
         // may be null and the library is not asked to take one.
         if (inputFrames <= 0) {
             // There is no audio to read, so the output is silence.
-            for (int sample = 0; sample < outputFrames * channels; ++sample) {
-                output[sample] = 0.0f;
+            if (outputFrames > 0) {
+                const std::size_t samples = (std::size_t)outputFrames * channelCount;
+                for (std::size_t sample = 0; sample < samples; ++sample) {
+                    output[sample] = 0.0f;
+                }
             }
             return;
         }
@@ -65,10 +91,11 @@ struct DermixenSignalsmithStretch {
             return;
         }
         for (int channel = 0; channel < channels; ++channel) {
-            inputChannels[channel].resize(inputFrames);
-            outputChannels[channel].resize(outputFrames);
+            inputChannels[channel].resize((std::size_t)inputFrames);
+            outputChannels[channel].resize((std::size_t)outputFrames);
             for (int frame = 0; frame < inputFrames; ++frame) {
-                inputChannels[channel][frame] = input[frame * channels + channel];
+                const std::size_t at = (std::size_t)frame * channelCount + (std::size_t)channel;
+                inputChannels[channel][(std::size_t)frame] = input[at];
             }
             inputPointers[channel] = inputChannels[channel].data();
             outputPointers[channel] = outputChannels[channel].data();
@@ -76,7 +103,8 @@ struct DermixenSignalsmithStretch {
         library->process(inputPointers.data(), inputFrames, outputPointers.data(), outputFrames);
         for (int channel = 0; channel < channels; ++channel) {
             for (int frame = 0; frame < outputFrames; ++frame) {
-                output[frame * channels + channel] = outputChannels[channel][frame];
+                const std::size_t at = (std::size_t)frame * channelCount + (std::size_t)channel;
+                output[at] = outputChannels[channel][(std::size_t)frame];
             }
         }
     }
@@ -86,44 +114,88 @@ extern "C" {
 
 /// Creates a stretcher for `channels` channels of audio at `sampleRate` hertz,
 /// with `seed` fixing the random numbers the library uses internally.
+///
+/// The answer is null when the library or the buffers around it could not be
+/// allocated. The caller checks the two sizes before it calls this, so nothing
+/// here checks them again.
 DermixenSignalsmithStretch *dermixen_signalsmith_new(int channels, float sampleRate, long seed) {
-    return new DermixenSignalsmithStretch(channels, sampleRate, seed);
+    try {
+        return new DermixenSignalsmithStretch(channels, sampleRate, seed);
+    } catch (...) {
+        return nullptr;
+    }
 }
 
 /// Destroys a stretcher created by `dermixen_signalsmith_new`.
+///
+/// Nothing this destroys throws, and the catch is here so that every function
+/// on this boundary ends the same way.
 void dermixen_signalsmith_free(DermixenSignalsmithStretch *stretcher) {
-    delete stretcher;
+    try {
+        delete stretcher;
+    } catch (...) {
+    }
 }
 
 /// Puts a stretcher back into the state it was created in, so that the audio
-/// fed to it before is forgotten.
+/// fed to it before is forgotten. The answer is zero when the stretcher was
+/// reset and one when the library object could not be built again, which
+/// leaves the stretcher holding the audio it held before.
 ///
 /// This builds the library object again rather than calling the library's own
 /// reset, because that reset clears the buffers but leaves the random engine
 /// where it stood. Building again puts the engine back to the same seed, which
 /// is what makes two runs either side of a reset produce the same audio. The
 /// cost is that the buffers are allocated again.
-void dermixen_signalsmith_reset(DermixenSignalsmithStretch *stretcher) {
-    stretcher->build();
+int dermixen_signalsmith_reset(DermixenSignalsmithStretch *stretcher) {
+    try {
+        stretcher->build();
+        return STATUS_OK;
+    } catch (...) {
+        return STATUS_FAILED;
+    }
 }
 
 /// How many frames of input the library takes in before its output reflects them.
+///
+/// This reads a size the library worked out when it was built, so it throws
+/// nothing. A caught exception is answered with no latency at all.
 int dermixen_signalsmith_input_latency(const DermixenSignalsmithStretch *stretcher) {
-    return stretcher->library->inputLatency();
+    try {
+        return stretcher->library->inputLatency();
+    } catch (...) {
+        return 0;
+    }
 }
 
 /// How many frames of output the library produces before the output reflects
 /// the input that has reached the end of the input latency.
+///
+/// This reads a size the library worked out when it was built, so it throws
+/// nothing. A caught exception is answered with no latency at all.
 int dermixen_signalsmith_output_latency(const DermixenSignalsmithStretch *stretcher) {
-    return stretcher->library->outputLatency();
+    try {
+        return stretcher->library->outputLatency();
+    } catch (...) {
+        return 0;
+    }
 }
 
 /// Takes all `inputFrames` frames of interleaved input and fills all
 /// `outputFrames` frames of interleaved output, which plays the input at
 /// `inputFrames / outputFrames` times its original speed without moving its
 /// pitch.
-void dermixen_signalsmith_process(DermixenSignalsmithStretch *stretcher, const float *input,
-                                  int inputFrames, float *output, int outputFrames) {
-    stretcher->process(input, inputFrames, output, outputFrames);
+///
+/// The answer is zero when the block was stretched and one when the buffers
+/// this separates the channels into could not be allocated, in which case the
+/// output holds whatever it held before.
+int dermixen_signalsmith_process(DermixenSignalsmithStretch *stretcher, const float *input,
+                                 int inputFrames, float *output, int outputFrames) {
+    try {
+        stretcher->process(input, inputFrames, output, outputFrames);
+        return STATUS_OK;
+    } catch (...) {
+        return STATUS_FAILED;
+    }
 }
 }

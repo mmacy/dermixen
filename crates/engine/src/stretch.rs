@@ -221,7 +221,8 @@ impl SignalsmithStretcher {
     /// A stretcher configured for stereo audio at the internal sample rate.
     pub fn new() -> Self {
         Self {
-            stretch: signalsmith_sys::Stretch::new(CHANNELS, SAMPLE_RATE as f32, SIGNALSMITH_SEED),
+            stretch: signalsmith_sys::Stretch::new(CHANNELS, SAMPLE_RATE as f32, SIGNALSMITH_SEED)
+                .expect("two channels at 44.1 kHz are within the stretcher's limits"),
         }
     }
 }
