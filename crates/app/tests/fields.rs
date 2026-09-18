@@ -118,15 +118,15 @@ fn the_target_is_settled_when_typing_begins() {
 fn a_tempo_shown_while_typing_waits_until_the_typing_is_over() {
     let mut field: TempoField<()> = TempoField::new(Bpm(128.0), 1);
     field.begin(());
-    field.edit("12");
+    field.edit("125");
     field.show(Bpm(140.0));
     assert_eq!(
         field.text(),
-        "12",
+        "125",
         "the text is not rewritten under the person's fingers"
     );
-    assert_eq!(field.finish(), Finish::Written((), Bpm(12.0)));
-    assert_eq!(field.text(), "12.0");
+    assert_eq!(field.finish(), Finish::Written((), Bpm(125.0)));
+    assert_eq!(field.text(), "125.0");
 
     field.begin(());
     field.edit("abc");
