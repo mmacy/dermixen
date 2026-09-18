@@ -26,10 +26,10 @@ pub const FORMAT_VERSION: u32 = 1;
 /// tracks a file can hold, so the layout's running sum of anchors is exact.
 pub const MAX_BEAT: Beats = Beats(10_000_000.0);
 
-/// The longest track a document may name, which is three hours of audio, so
+/// The longest track a document may name, which is 90 minutes of audio, so
 /// that a whole DJ set can be one track of a mix. The magnitude of a grid's
 /// first beat has the same limit.
-pub const LONGEST_TRACK: Samples = Samples(3 * 3_600 * crate::units::SAMPLE_RATE as i64);
+pub const LONGEST_TRACK: Samples = Samples(90 * 60 * crate::units::SAMPLE_RATE as i64);
 
 /// The longest mix the app reads, lays out, or renders, which is 24 hours
 /// from the first sample heard to the last.

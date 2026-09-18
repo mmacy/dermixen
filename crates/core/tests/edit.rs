@@ -1225,7 +1225,7 @@ fn out_of_range_edits() -> Vec<Edit> {
     far.length = Samples(240 * 44_100);
     far.anchors.intro = Beats(-1e308);
     let mut long = track("c", 16.0, 256.0);
-    long.length = Samples(476_280_001);
+    long.length = Samples(238_140_001);
     let grid = |first_beat: i64, bpm: f64| BeatGrid {
         first_beat: Samples(first_beat),
         bpm: Bpm(bpm),
@@ -1254,7 +1254,7 @@ fn out_of_range_edits() -> Vec<Edit> {
         },
         Edit::SetGrid {
             track: 1,
-            grid: grid(476_280_001, 130.0),
+            grid: grid(238_140_001, 130.0),
         },
         Edit::AddNode {
             track: 0,
@@ -1465,7 +1465,7 @@ fn edits_at_the_limits() -> impl Strategy<Value = Edit> {
             track,
             node: tempo(at, bpm)
         }),
-        (0usize..2, -476_280_000i64..=476_280_000, bpms).prop_map(|(track, first_beat, bpm)| {
+        (0usize..2, -238_140_000i64..=238_140_000, bpms).prop_map(|(track, first_beat, bpm)| {
             Edit::SetGrid {
                 track,
                 grid: BeatGrid {

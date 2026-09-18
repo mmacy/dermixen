@@ -452,7 +452,7 @@ fn a_track_on_the_limits(bpm: f64, first_beat: i64, gain: f64, beat: f64) -> Str
         r#"{{"version": 1, "tracks": [{{
             "path": "/Users/dermixenuser/audio/edge.wav",
             "hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "length_samples": 476280000,
+            "length_samples": 238140000,
             "grid": {{"first_beat_sample": {first_beat}, "bpm": {bpm}}},
             "anchors": {{"intro_beat": {}, "outro_beat": {beat}}},
             "keylock": true,
@@ -468,20 +468,20 @@ fn a_track_on_the_limits(bpm: f64, first_beat: i64, gain: f64, beat: f64) -> Str
 #[test]
 #[ignore = "document-bounds"]
 fn a_value_exactly_on_its_limit_is_accepted() {
-    for (bpm, first_beat, gain) in [(20.0, 476_280_000, 24.0), (999.0, -476_280_000, -144.0)] {
+    for (bpm, first_beat, gain) in [(20.0, 238_140_000, 24.0), (999.0, -238_140_000, -144.0)] {
         let text = a_track_on_the_limits(bpm, first_beat, gain, 10_000_000.0);
         let mix = Mix::from_json(&text).unwrap_or_else(|e| panic!("{bpm} BPM: {e}"));
         assert_eq!(mix.check(), Ok(()));
         let timeline = mix.timeline().unwrap();
-        // Three hours of audio at its own tempo is three hours of mix.
-        assert!(close((timeline.end() - timeline.start()).0, 10_800.0));
+        // Ninety minutes of audio at its own tempo is ninety minutes of mix.
+        assert!(close((timeline.end() - timeline.start()).0, 5_400.0));
     }
 }
 
 #[test]
 #[ignore = "document-bounds"]
 fn one_track_slowed_past_a_day_is_refused_as_too_long() {
-    // Three hours of audio at 999 beats per minute, played at 20, lasts almost 150 hours.
+    // Ninety minutes of audio at 999 beats per minute, played at 20, lasts almost 75 hours.
     let text = a_track_on_the_limits(999.0, 0, 0.0, 0.0).replace(
         r#""tempo": [{"beat": 0, "bpm": 999}]"#,
         r#""tempo": [{"beat": 0, "bpm": 20}]"#,
@@ -583,8 +583,8 @@ fn hostile_numbers() -> impl Strategy<Value = f64> {
         1e300,
         1e308,
         -1e308,
-        476_280_000.0,
-        476_280_001.0,
+        238_140_000.0,
+        238_140_001.0,
         24.0,
         -144.0,
         1e6,
@@ -604,8 +604,8 @@ fn mostly(ordinary: &[f64]) -> impl Strategy<Value = f64> + use<> {
 fn hostile_tracks() -> impl Strategy<Value = serde_json::Value> {
     (
         (
-            mostly(&[0.0, 44_100.0, 18_522_000.0, 476_280_000.0]),
-            mostly(&[0.0, 4410.0, -4410.0, 476_280_000.0, -476_280_000.0]),
+            mostly(&[0.0, 44_100.0, 18_522_000.0, 238_140_000.0]),
+            mostly(&[0.0, 4410.0, -4410.0, 238_140_000.0, -238_140_000.0]),
             mostly(&[20.0, 138.0, 140.0, 999.0]),
             mostly(&[0.0, 16.0, 64.0, -64.0]),
             mostly(&[64.0, 896.0, 1024.0, 100_000.0]),
