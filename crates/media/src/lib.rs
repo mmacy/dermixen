@@ -15,7 +15,10 @@ pub mod mp3;
 pub mod overview;
 pub mod wav;
 
-pub use decode::{DecodeError, Decoded, decode};
+pub use decode::{
+    DecodeError, Decoded, HIGHEST_SOURCE_RATE, LARGEST_AUDIO_FILE, LOWEST_SOURCE_RATE,
+    SAMPLE_LIMIT, decode,
+};
 pub use hash::hash_file;
 #[cfg(feature = "mp3")]
 pub use mp3::{MP3_BITRATE_KBPS, Mp3Error, Mp3File, write_mp3};

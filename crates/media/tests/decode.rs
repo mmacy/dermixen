@@ -285,3 +285,183 @@ fn an_mp3_decodes_in_time_with_the_wav_it_was_encoded_from() {
         .unwrap();
     assert_eq!(best, 0, "the MP3 decodes {best} frames off the WAV");
 }
+
+/// Writes a WAV file of `frames` stereo frames of a quiet ramp that states
+/// `rate` as its sample rate.
+fn wav_at_rate(path: &Path, rate: u32, frames: u32) {
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: rate,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(path, spec).unwrap();
+    for n in 0..frames {
+        writer.write_sample((n % 100) as i16).unwrap();
+        writer.write_sample((n % 100) as i16).unwrap();
+    }
+    writer.finalize().unwrap();
+}
+
+#[test]
+fn a_stated_sample_rate_outside_the_range_is_unsupported_at_once() {
+    let folder = tempfile::tempdir().unwrap();
+    for rate in [1, 8, 7_999, 384_001, 1_000_000] {
+        let path = folder.path().join(format!("rate-{rate}.wav"));
+        wav_at_rate(&path, rate, 1_000);
+        let started = std::time::Instant::now();
+        match decode(&path) {
+            Err(DecodeError::Unsupported { message, .. }) => {
+                assert!(message.contains("sample rate"), "{rate}: {message}")
+            }
+            other => panic!("{rate}: {:?}", other.map(|decoded| decoded.audio.len())),
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "{rate}"
+        );
+    }
+}
+
+#[test]
+fn the_lowest_and_highest_sample_rates_decode() {
+    let folder = tempfile::tempdir().unwrap();
+    for (rate, frames) in [(8_000_u32, 800_u32), (384_000, 38_400)] {
+        let path = folder.path().join(format!("rate-{rate}.wav"));
+        wav_at_rate(&path, rate, frames);
+        let decoded = decode(&path).unwrap();
+        assert_eq!(decoded.source_sample_rate, rate);
+        // A tenth of a second at any rate is 4,410 frames at the internal rate.
+        let length = decoded.audio.len().0;
+        assert!((4_400..=4_420).contains(&length), "{rate}: {length}");
+    }
+}
+
+#[test]
+fn every_decoded_sample_is_finite_and_within_the_limit() {
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("hostile-float.wav");
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: 44_100,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let left = [
+        0.25,
+        f32::NAN,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        1e30,
+        -1e30,
+        f32::MAX,
+        8.0,
+        -8.0,
+        1.5,
+        -0.5,
+    ];
+    let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+    for sample in left {
+        writer.write_sample(sample).unwrap();
+        writer.write_sample(0.125_f32).unwrap();
+    }
+    writer.finalize().unwrap();
+
+    let decoded = decode(&path).unwrap();
+    let got: Vec<f32> = decoded.audio.frames.iter().map(|frame| frame[0]).collect();
+    assert_eq!(
+        got,
+        [0.25, 0.0, 8.0, -8.0, 8.0, -8.0, 8.0, 8.0, -8.0, 1.5, -0.5]
+    );
+    assert!(decoded.audio.frames.iter().all(|frame| frame[1] == 0.125));
+    assert_eq!(dermixen_media::SAMPLE_LIMIT, 8.0);
+}
+
+#[test]
+fn a_header_that_overflows_the_decoding_library_is_refused() {
+    // Each file states a number that symphonia 0.6.1 multiplies out without
+    // checking: the WAV file states 65,535 channels, and the MP4 file's
+    // `stts` box states 4,294,967,295 samples. A debug build of symphonia
+    // panics on the overflow and prints the panic to the standard error.
+    // Whether the number is refused before symphonia reaches it or the panic
+    // is caught, `decode` has to answer with an error and leave the process
+    // running, so that one file like these does not end a library scan or a
+    // render.
+    for name in ["wav-65535-channels.wav", "m4a-huge-sample-count.m4a"] {
+        let path = fixture(name);
+        match decode(&path) {
+            Err(DecodeError::Corrupt {
+                path: reported,
+                message,
+            })
+            | Err(DecodeError::Unsupported {
+                path: reported,
+                message,
+            }) => {
+                assert_eq!(reported, path, "{name}");
+                assert!(!message.is_empty(), "{name}");
+            }
+            other => panic!("{name}: {:?}", other.map(|decoded| decoded.audio.len())),
+        }
+    }
+}
+
+#[test]
+fn a_track_longer_than_the_limit_is_refused_before_it_is_decoded() {
+    // Each file is 64 KB of FLAC that decodes to 91 minutes of silence, which
+    // is 1.9 GB of frames. One states its length in its header and the other
+    // states none, so its length is known only from the packets.
+    for name in [
+        "silence-91-minutes.flac",
+        "silence-91-minutes-no-total.flac",
+    ] {
+        let started = std::time::Instant::now();
+        match decode(&fixture(name)) {
+            Err(DecodeError::Unsupported { message, .. }) => {
+                assert!(message.contains("90 minutes"), "{name}: {message}")
+            }
+            other => panic!("{name}: {:?}", other.map(|decoded| decoded.audio.len())),
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(60),
+            "{name} took {:?}",
+            started.elapsed()
+        );
+    }
+}
+
+#[test]
+fn a_resampled_track_is_within_the_limit_too() {
+    // A resampling filter overshoots, so a square wave at the limit comes out
+    // of the resampler past it unless the output is held as well.
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("square-48k.wav");
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: 48_000,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+    for n in 0..48_000 {
+        let value = if (n / 100) % 2 == 0 { 8.0_f32 } else { -8.0 };
+        writer.write_sample(value).unwrap();
+        writer
+            .write_sample(if n == 24_000 { f32::NAN } else { value })
+            .unwrap();
+    }
+    writer.finalize().unwrap();
+    let decoded = decode(&path).unwrap();
+    assert!((44_000..=44_200).contains(&decoded.audio.len().0));
+    let largest = decoded
+        .audio
+        .frames
+        .iter()
+        .flat_map(|frame| frame.iter())
+        .fold(0.0_f32, |most, sample| {
+            assert!(sample.is_finite());
+            most.max(sample.abs())
+        });
+    assert!(largest <= 8.0, "{largest}");
+    assert!(largest > 7.0, "{largest}");
+}
