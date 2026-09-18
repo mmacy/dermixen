@@ -665,3 +665,161 @@ fn a_query_can_require_a_least_grid_and_anchor_confidence() {
         vec!["01 Sure grid", "02 On the line", "03 Sure anchors"]
     );
 }
+
+/// Runs one SQL statement on a library file, as a person or a program
+/// outside Dermixen could.
+fn run_sql(path: &Path, sql: &str) {
+    let connection = rusqlite::Connection::open(path).unwrap();
+    connection.execute_batch(sql).unwrap();
+}
+
+#[test]
+fn eight_openers_of_one_new_library_file_all_succeed() {
+    for round in 0..10 {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.sqlite");
+        let openers: Vec<_> = (0..8)
+            .map(|_| {
+                let path = path.clone();
+                std::thread::spawn(move || Index::open(&path).map(|index| index.len()))
+            })
+            .collect();
+        for opener in openers {
+            let opened = opener.join().unwrap();
+            assert!(
+                matches!(opened, Ok(Ok(0))),
+                "round {round}: {:?}",
+                opened.map(|_| ())
+            );
+        }
+    }
+}
+
+#[test]
+fn a_row_that_cannot_be_read_costs_only_that_row() {
+    let damage = [
+        "UPDATE tracks SET bpm = 'fast' WHERE path = '/music/b.mp3'",
+        "UPDATE tracks SET artist = x'fffe00' WHERE path = '/music/b.mp3'",
+        "UPDATE tracks SET metadata_source = 'a guess' WHERE path = '/music/b.mp3'",
+        "UPDATE tracks SET bpm = 9e999 WHERE path = '/music/b.mp3'",
+        "UPDATE tracks SET bpm = 0 WHERE path = '/music/b.mp3'",
+        "UPDATE tracks SET bpm = 1000 WHERE path = '/music/b.mp3'",
+        "UPDATE tracks SET length_samples = -1 WHERE path = '/music/b.mp3'",
+        "UPDATE tracks SET intro_beat = 0.5 WHERE path = '/music/b.mp3'",
+        "UPDATE tracks SET intro_beat = 9e999 WHERE path = '/music/b.mp3'",
+        "UPDATE tracks SET outro_beat = 1e18 WHERE path = '/music/b.mp3'",
+        "UPDATE tracks SET first_beat_sample = 9000000000000 WHERE path = '/music/b.mp3'",
+    ];
+    for statement in damage {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.sqlite");
+        let mut index = Index::open(&path).unwrap();
+        for (byte, name) in [
+            (1, "/music/a.mp3"),
+            (2, "/music/b.mp3"),
+            (3, "/music/c.mp3"),
+        ] {
+            index
+                .upsert(&record(byte, name, 140.0, Some(1996), None))
+                .unwrap();
+        }
+        drop(index);
+        run_sql(&path, statement);
+
+        let index = Index::open(&path).unwrap();
+        let (records, skipped) = index.query_with_skipped(&Query::default()).unwrap();
+        let paths: Vec<_> = records.iter().map(|record| record.path.clone()).collect();
+        assert_eq!(skipped, 1, "{statement}");
+        assert_eq!(
+            paths,
+            [PathBuf::from("/music/a.mp3"), PathBuf::from("/music/c.mp3")],
+            "{statement}"
+        );
+        assert_eq!(
+            index.query(&Query::default()).unwrap().len(),
+            2,
+            "{statement}"
+        );
+    }
+}
+
+#[test]
+fn a_library_file_with_anything_dermixen_did_not_write_in_it_is_refused() {
+    let planted = [
+        (
+            "forget",
+            "CREATE TRIGGER forget AFTER INSERT ON tracks BEGIN DELETE FROM tracks; END",
+        ),
+        (
+            "everything",
+            "CREATE VIEW everything AS SELECT * FROM tracks",
+        ),
+        ("notes", "CREATE TABLE notes (text TEXT)"),
+    ];
+    for (name, statement) in planted {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.sqlite");
+        drop(Index::open(&path).unwrap());
+        run_sql(&path, statement);
+        match Index::open(&path) {
+            Err(IndexError::Open { message, .. }) => {
+                assert!(message.contains(name), "{statement}: {message}")
+            }
+            Err(other) => panic!("{statement}: {other}"),
+            Ok(_) => panic!("{statement}: the file was opened"),
+        }
+    }
+}
+
+#[test]
+fn a_path_that_looks_like_a_sqlite_uri_names_a_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("file:library.sqlite?mode=memory");
+    let mut index = Index::open(&path).unwrap();
+    index
+        .upsert(&record(1, "/music/a.mp3", 140.0, None, None))
+        .unwrap();
+    drop(index);
+    assert!(path.is_file(), "the library was not written to {path:?}");
+    assert_eq!(Index::open(&path).unwrap().len().unwrap(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_new_library_file_is_for_its_owner_alone() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("library.sqlite");
+    let mut index = Index::open(&path).unwrap();
+    index
+        .upsert(&record(1, "/music/a.mp3", 140.0, None, None))
+        .unwrap();
+    drop(index);
+    assert_eq!(mode(&path), 0o600);
+
+    // A file the person made keeps the permissions the person gave it.
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    drop(Index::open(&path).unwrap());
+    assert_eq!(mode(&path), 0o644);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_new_library_file_reached_through_a_link_is_for_its_owner_alone() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("target.sqlite");
+    let link = dir.path().join("library.sqlite");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    drop(Index::open(&link).unwrap());
+    let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+}

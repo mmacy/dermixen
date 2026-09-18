@@ -18,8 +18,8 @@ pub use index::{
     TrackRecord,
 };
 pub use metadata::{
-    Metadata, MetadataSource, Release, ReleaseDataSource, TagError, metadata_of, parse_filename,
-    read_tags,
+    LONGEST_TAG, Metadata, MetadataSource, Release, ReleaseDataSource, TagError, metadata_of,
+    parse_filename, read_tags,
 };
 pub use pipeline::{
     AnalyzeError, AnalyzerSet, Analyzers, Change, Progress, ScanIntoError, ScanSummary,

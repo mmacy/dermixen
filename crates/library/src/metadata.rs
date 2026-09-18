@@ -85,13 +85,24 @@ pub struct TagError {
     pub message: String,
 }
 
+/// The most characters of a tag the library stores. A longer artist, title,
+/// or other text field is cut at this many characters.
+///
+/// A tag has no length limit of its own, so a file can hold megabytes of text
+/// in one field. Storing such a field whole would slow every query and every
+/// search over the library, and no artist or title a person reads is longer
+/// than this.
+pub const LONGEST_TAG: usize = 1_024;
+
 /// Reads the artist, title, and year from a file's tags.
 ///
 /// ID3 tags in MP3 files, Vorbis comments in FLAC files, and iTunes-style
-/// tags in MP4 files are all read. Whitespace around a value is dropped, and
-/// a value that is empty after that counts as absent. Returns `Ok(None)` when
-/// the file has no tags or its tags hold neither an artist nor a title, and
-/// an error when the file cannot be opened or its tags cannot be parsed.
+/// tags in MP4 files are all read. Whitespace around a value is dropped, a
+/// value that is empty after that counts as absent, and a value longer than
+/// [`LONGEST_TAG`] characters keeps its first [`LONGEST_TAG`] characters.
+/// Returns `Ok(None)` when the file has no tags or its tags hold neither an
+/// artist nor a title, and an error when the file cannot be opened or its
+/// tags cannot be parsed.
 pub fn read_tags(path: &Path) -> Result<Option<Metadata>, TagError> {
     let file = lofty::read_from_path(path).map_err(|problem| TagError {
         path: path.to_path_buf(),
@@ -123,11 +134,23 @@ pub fn read_tags(path: &Path) -> Result<Option<Metadata>, TagError> {
     }))
 }
 
-/// A tag value with its surrounding whitespace dropped, or `None` when
-/// nothing is left of it.
+/// A tag value with its surrounding whitespace dropped and its length cut to
+/// [`LONGEST_TAG`], or `None` when nothing is left of it.
 fn usable(value: Option<&str>) -> Option<String> {
     let value = value?.trim();
-    (!value.is_empty()).then(|| value.to_owned())
+    (!value.is_empty()).then(|| cut(value))
+}
+
+/// The text with at most [`LONGEST_TAG`] characters of it kept.
+///
+/// The cut falls on a character boundary, so a field of characters that take
+/// several bytes each comes back as whole characters rather than as a broken
+/// one at the end.
+fn cut(value: &str) -> String {
+    match value.char_indices().nth(LONGEST_TAG) {
+        Some((end, _character)) => value[..end].to_owned(),
+        None => value.to_owned(),
+    }
 }
 
 /// The year at the front of a recording date.
@@ -153,7 +176,8 @@ fn year_of(date: &str) -> Option<u16> {
 ///
 /// `docs/library.md` states the rules. The result's source is always
 /// [`MetadataSource::Filename`], its title is always present, and its year is
-/// never present.
+/// never present. A name longer than [`LONGEST_TAG`] characters gives an
+/// artist and a title cut to [`LONGEST_TAG`] characters, as a tag is.
 pub fn parse_filename(path: &Path) -> Metadata {
     let stem = path
         .file_stem()
@@ -205,7 +229,7 @@ pub fn parse_filename(path: &Path) -> Metadata {
     };
     Metadata {
         artist: usable(artist.as_deref()),
-        title: Some(title),
+        title: Some(cut(&title)),
         year: None,
         year_is_approximate: false,
         source: MetadataSource::Filename,
