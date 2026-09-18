@@ -49,19 +49,26 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from discogs_release import (  # noqa: E402
+    API,
     LIBRARY,
     folder_artist_and_title,
     folder_catalog_number,
     SCHEMA_VERSION,
     USER_AGENT,
     RateLimited,
+    as_label_list,
+    as_text,
+    cell,
     comparable,
     credentials,
+    escaped_like,
     load_export,
     names_the_same_act,
     normalized,
+    open_request,
     release_folder,
     search_releases,
+    uncell,
 )
 
 # A year at or after this one is a suspect. Goa trance that says 2005 or later
@@ -151,28 +158,40 @@ def is_retrospective(title: str) -> bool:
 
 
 def search_tracks(artist: str, title: str, auth: tuple[str, str]) -> list[dict]:
-    """Every release Discogs lists that contains this artist's track."""
+    """Every release Discogs lists that contains this artist's track.
+
+    Returns:
+        Every result the answer's `results` field gives, keeping only the
+        entries that are themselves objects. An answer of the wrong shape
+        gives no results rather than raising.
+    """
     query = urllib.parse.urlencode(
         {"artist": artist, "track": title, "type": "release"}
     )
     request = urllib.request.Request(
-        f"https://api.discogs.com/database/search?{query}",
+        f"{API}/database/search?{query}",
         headers={
             "User-Agent": USER_AGENT,
             "Authorization": f"Discogs key={auth[0]}, secret={auth[1]}",
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=30) as answer:
+        with open_request(request) as answer:
             remaining = answer.headers.get("X-Discogs-Ratelimit-Remaining")
             body = json.load(answer)
     except urllib.error.HTTPError as problem:
         if problem.code == 429:
             raise RateLimited(f"{artist} - {title}") from problem
         raise
-    if remaining is not None and int(remaining) < 5:
+    # A header that does not name a number is treated as not counting down.
+    try:
+        low_on_requests = remaining is not None and int(remaining) < 5
+    except ValueError:
+        low_on_requests = False
+    if low_on_requests:
         raise RateLimited(f"{artist} - {title}")
-    return body.get("results", [])
+    results = body.get("results") if isinstance(body, dict) else None
+    return [result for result in results if isinstance(result, dict)] if isinstance(results, list) else []
 
 
 def earliest_year(results: list[dict], suspect_from: int) -> tuple[int | None, str]:
@@ -192,8 +211,8 @@ def earliest_year(results: list[dict], suspect_from: int) -> tuple[int | None, s
     if not dated:
         return None, "Discogs lists no dated release containing this track"
     year, result = min(dated, key=lambda pair: pair[0])
-    labels = result.get("label") or []
-    title = result.get("title", "")
+    labels = as_label_list(result.get("label"))
+    title = as_text(result.get("title"))
     label = labels[0] if labels else "no label"
     # The earliest release is the answer only when it is the music's own
     # release. An archival pressing or a retrospective collection is dated
@@ -282,7 +301,7 @@ def release_year(
     exact = [
         result
         for result in results
-        if normalized(result.get("catno") or "") == wanted
+        if normalized(as_text(result.get("catno"))) == wanted
     ]
     if artist:
         named = [result for result in exact if names_the_same_act(result, comparable(artist))]
@@ -520,7 +539,7 @@ def run_match(args: argparse.Namespace) -> int:
     with open(args.out, "w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=FIELDS)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows({key: cell(value) for key, value in row.items()} for row in rows)
     print(
         f"{len(rows)} rows need a year"
         f"{' (including rows that have none)' if args.include_undated else ''}. "
@@ -545,7 +564,11 @@ def run_match(args: argparse.Namespace) -> int:
 def run_apply(args: argparse.Namespace) -> int:
     """Writes the proposed years into the library."""
     with open(args.proposed, newline="", encoding="utf-8") as handle:
-        rows = [row for row in csv.DictReader(handle) if row["source"]]
+        rows = [
+            {key: uncell(value) for key, value in row.items()}
+            for row in csv.DictReader(handle)
+            if row["source"]
+        ]
     connection = open_library(args.library, writable=True)
     try:
         dated = cleared = 0
@@ -709,7 +732,7 @@ def run_approximate(args: argparse.Namespace) -> int:
     with open(args.out, "w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=APPROXIMATE_FIELDS)
         writer.writeheader()
-        writer.writerows(proposals)
+        writer.writerows({key: cell(value) for key, value in row.items()} for row in proposals)
     proposed = [row for row in proposals if row["proposed_year"]]
     print(
         f"{len(proposals)} releases have undated tracks, "
@@ -730,15 +753,19 @@ def run_apply_approximate(args: argparse.Namespace) -> int:
     later query that the track is placed in an era rather than dated.
     """
     with open(args.proposed, newline="", encoding="utf-8") as handle:
-        rows = [row for row in csv.DictReader(handle) if row["proposed_year"].strip()]
+        rows = [
+            {key: uncell(value) for key, value in row.items()}
+            for row in csv.DictReader(handle)
+            if row["proposed_year"].strip()
+        ]
     connection = open_library(args.library, writable=True)
     try:
         written = 0
         for row in rows:
             year = int(row["proposed_year"])
             for (path,) in connection.execute(
-                "SELECT path FROM tracks WHERE year IS NULL AND path LIKE ?",
-                (row["folder"] + "/%",),
+                "SELECT path FROM tracks WHERE year IS NULL AND path LIKE ? ESCAPE '\\'",
+                (escaped_like(row["folder"]) + "/%",),
             ).fetchall():
                 if release_folder(path) != row["folder"]:
                     continue

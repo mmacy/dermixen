@@ -24,7 +24,7 @@ python3 tools/make_long_flac.py 89 /tmp/silence-89-minutes-384k.flac --rate 3840
 
 Each FLAC frame is a constant subframe of 17 to 19 bytes that decodes to 65,535 stereo frames, so 91 minutes of audio is about 64 KB. `--no-total` leaves the total length out of the header, so a decoder learns the length only by decoding, which is the case that makes the decoder measure the audio as it goes.
 
-`--rate` writes the file at another sample rate. A file at 384 kHz is eight and a half times as many samples per second as the internal rate of 44.1 kHz, so it is what shows whether a decode holds the file's own samples or only the resampled ones. FLAC's frame header has a code for 44,100 Hz and none for most other rates, so at any other rate the frame header carries code 0, which sends a decoder to the stream header for the rate.
+`--rate` writes the file at another sample rate. A second of audio at 384 kHz is about 8.7 times as many frames as a second at the internal rate of 44.1 kHz, so a file at 384 kHz is what shows whether a decode holds the file's own frames or only the resampled ones. FLAC's frame header has a code for 44,100 Hz and none for most other rates, so at any other rate the frame header carries code 0, which sends a decoder to the stream header for the rate.
 
 The program needs nothing beyond a Python 3 interpreter and prints the byte count, the frame count, and the length in minutes of the file it wrote.
 
@@ -42,6 +42,8 @@ python3 tools/mmp_dump.py --json "some playlist.mmp"
 ```
 
 It needs nothing beyond a Python 3 interpreter. The readable output gives one block per track. The JSON output gives the same information in full, which is the more useful form for feeding another program.
+
+A damaged playlist, one whose chunks nest too deep or whose declared sizes do not match the bytes the file holds, is reported in one line on standard error naming the file, and the program exits with status 1 rather than crashing. A file over 64 MB is refused the same way before it is read, since the largest real playlist is under 1 MB. The readable output escapes a control character found in a path or a transition name, such as an escape or a bell, as `\xHH`, since a terminal interprets those characters as commands rather than printing them. The JSON output leaves the character as it is, since JSON already escapes it.
 
 ### What the format looks like
 
@@ -196,6 +198,8 @@ Where they do not agree the folder is left for the API. The Doof folder `[TIPCD1
 `apply` reads the CSV and writes the release columns of every track under each resolved folder. The track number comes from the leading number in the file's name rather than from Discogs, so on a release spread over two discs it is the position on the disc: both `CD1/01` and `CD2/01` store 1.
 
 `discogs_release.py` and `discogs_year.py` both refuse a library file whose layout version is not the one `crates/library/src/index.rs` writes, and name the version they found.
+
+Both tools build every request against the address in the module constant `API` and never follow a redirect that changes the host or the port, so the consumer key and secret never reach anywhere Discogs did not name. Neither crashes on an answer of the wrong shape, such as a rate-limit header that is not a number or a `results` field that is not a list. A text value that begins with `=`, `+`, `-`, `@`, a tab, or a carriage return, and so could open as a formula in a spreadsheet, is written to the CSV with a leading single quote instead.
 
 ## discogs_year.py
 

@@ -22,6 +22,7 @@ Anything unidentified says so rather than guessing: see
 import argparse
 import dataclasses
 import json
+import re
 import struct
 import sys
 from pathlib import Path
@@ -37,6 +38,18 @@ MARKER_SIZE = 32
 
 CONTAINER_IDS = frozenset({b"RIFF", b"LIST"})
 """Chunk identifiers whose payload holds further chunks rather than data."""
+
+MAX_FILE_SIZE = 64 * 1024 * 1024
+"""Largest file this module reads as a playlist. The largest real playlist on
+record is under 1 MB."""
+
+MAX_NESTING_DEPTH = 25
+"""How deep a chunk inside a track is allowed to nest. A real playlist nests a
+handful of levels deep at most, so a file that nests further is damaged
+rather than unusual."""
+
+CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+"""A C0, C1, or DEL control character, the kind a terminal can act on."""
 
 LANE_NAMES: dict[int, str] = {
     0x10000000: "beatgrid",
@@ -179,9 +192,48 @@ class Playlist:
     version: tuple[int, ...] = ()
 
 
+def _visible(text: str) -> str:
+    """`text` with every control character replaced by a visible escape.
+
+    A path or a transition name comes straight out of the file, and a
+    terminal printing it reads a control character in it, such as an escape
+    or a bell, as a command rather than a character to display. Each C0, C1,
+    or DEL character becomes `\\xHH` instead.
+    """
+    return CONTROL_CHARACTERS.sub(lambda match: f"\\x{ord(match.group()):02x}", text)
+
+
 def _decode_text(raw: bytes) -> str:
     """Decode a UTF-16LE string chunk, dropping its terminating null."""
     return raw.decode("utf-16-le", errors="replace").rstrip("\x00")
+
+
+def _chunk_header(data: bytes, offset: int, end: int) -> tuple[bytes, int, int]:
+    """The identifier, declared size, and body offset of the chunk at `offset`.
+
+    Args:
+        data: The whole file.
+        offset: Offset of the chunk's identifier.
+        end: Offset the chunk's header must fit before.
+
+    Returns:
+        The four-byte identifier, the declared payload size, and the offset
+        where the payload begins.
+
+    Raises:
+        ValueError: If the header runs past `end`, or the chunk's declared
+            payload size reaches past the bytes the file actually holds.
+            This check compares a declared size against the bytes the file
+            actually has, rather than trusting the declared size outright.
+    """
+    if offset + 8 > end:
+        raise ValueError("a chunk header runs past the end of its container")
+    chunk_id = data[offset : offset + 4]
+    (size,) = struct.unpack_from("<I", data, offset + 4)
+    body = offset + 8
+    if body + size > len(data):
+        raise ValueError("a chunk declares more data than the file holds")
+    return chunk_id, size, body
 
 
 def _decode_marker(raw: bytes) -> Marker:
@@ -197,7 +249,9 @@ def _decode_span(raw: bytes) -> Span:
     return Span(start_us=start_us, end_us=end_us, source_us=source_us)
 
 
-def _read_track(data: bytes, start: int, end: int, track: Track, list_type: bytes) -> None:
+def _read_track(
+    data: bytes, start: int, end: int, track: Track, list_type: bytes, depth: int = 0
+) -> None:
     """Walk one track's chunks, filling in `track` as each is recognised.
 
     Args:
@@ -207,16 +261,24 @@ def _read_track(data: bytes, start: int, end: int, track: Track, list_type: byte
         track: Track being filled in.
         list_type: Type of the enclosing `LIST`, which decides whether markers
             found here belong to the beat grid or to the automation lanes.
+        depth: How many containers deep this call is nested inside the track.
+
+    Raises:
+        ValueError: If a chunk's header or declared size does not fit the
+            bytes the file holds, or if containers nest past
+            [`MAX_NESTING_DEPTH`][tools.mmp_dump.MAX_NESTING_DEPTH].
     """
+    if depth > MAX_NESTING_DEPTH:
+        raise ValueError("chunks nest deeper than a real playlist ever does")
     offset = start
     while offset + 8 <= end:
-        chunk_id = data[offset : offset + 4]
-        (size,) = struct.unpack_from("<I", data, offset + 4)
-        body = offset + 8
+        chunk_id, size, body = _chunk_header(data, offset, end)
         raw = data[body : body + size]
 
         if chunk_id in CONTAINER_IDS:
-            _read_track(data, body + 4, min(body + size, end), track, data[body : body + 4])
+            _read_track(
+                data, body + 4, min(body + size, end), track, data[body : body + 4], depth + 1
+            )
         elif chunk_id == b"TRKF":
             track.path = _decode_text(raw)
         elif chunk_id == b"TRSI":
@@ -251,7 +313,11 @@ def read_playlist(path: str | Path) -> Playlist:
         The parsed playlist.
 
     Raises:
-        ValueError: If the file is not a RIFF container of form type `MXMP`.
+        ValueError: If the file is larger than
+            [`MAX_FILE_SIZE`][tools.mmp_dump.MAX_FILE_SIZE], if it is not a
+            RIFF container of form type `MXMP`, or if a chunk inside it is
+            damaged: its header or its declared size does not fit the bytes
+            the file holds, or containers nest too deep.
 
     Examples:
         ```python
@@ -260,32 +326,45 @@ def read_playlist(path: str | Path) -> Playlist:
             print(track.path, track.original_bpm)
         ```
     """
-    data = Path(path).read_bytes()
-    if data[:4] != b"RIFF" or data[8:12] != b"MXMP":
+    path = Path(path)
+    size_on_disk = path.stat().st_size
+    if size_on_disk > MAX_FILE_SIZE:
+        raise ValueError(
+            f"{path} is {size_on_disk} bytes, larger than a MixMeister playlist "
+            f"ever is (the limit is {MAX_FILE_SIZE} bytes)"
+        )
+    data = path.read_bytes()
+    try:
+        riff_id, riff_size, riff_body = _chunk_header(data, 0, len(data))
+    except ValueError as error:
+        raise ValueError(f"{path} is not a MixMeister playlist ({error})") from error
+    if riff_id != b"RIFF" or data[riff_body : riff_body + 4] != b"MXMP":
         raise ValueError(f"{path} is not a MixMeister playlist (expected a RIFF file of form MXMP)")
 
     playlist = Playlist()
-    offset, end = 12, len(data)
-    while offset + 8 <= end:
-        chunk_id = data[offset : offset + 4]
-        (size,) = struct.unpack_from("<I", data, offset + 4)
-        body = offset + 8
+    try:
+        offset, end = 12, len(data)
+        while offset + 8 <= end:
+            chunk_id, size, body = _chunk_header(data, offset, end)
 
-        if chunk_id == b"LIST" and data[body : body + 4] == b"TRKL":
-            inner = body + 4
-            inner_end = min(body + size, end)
-            while inner + 8 <= inner_end:
-                (inner_size,) = struct.unpack_from("<I", data, inner + 4)
-                if data[inner : inner + 4] == b"LIST" and data[inner + 8 : inner + 12] == b"TRKI":
-                    track = Track()
-                    _read_track(data, inner + 12, inner + 8 + inner_size, track, b"TRKI")
-                    playlist.tracks.append(track)
-                inner += 8 + inner_size + (inner_size & 1)
-        elif chunk_id == b"MMVR":
-            count = size // 2
-            playlist.version = struct.unpack_from(f"<{count}H", data, body)
+            if chunk_id == b"LIST" and data[body : body + 4] == b"TRKL":
+                inner, inner_end = body + 4, min(body + size, end)
+                while inner + 8 <= inner_end:
+                    inner_id, inner_size, inner_body = _chunk_header(data, inner, inner_end)
+                    if inner_id == b"LIST" and data[inner_body : inner_body + 4] == b"TRKI":
+                        track = Track()
+                        _read_track(
+                            data, inner_body + 4, min(inner_body + inner_size, inner_end), track, b"TRKI"
+                        )
+                        playlist.tracks.append(track)
+                    inner = inner_body + inner_size + (inner_size & 1)
+            elif chunk_id == b"MMVR":
+                count = size // 2
+                playlist.version = struct.unpack_from(f"<{count}H", data, body)
 
-        offset = body + size + (size & 1)
+            offset = body + size + (size & 1)
+    except ValueError as error:
+        raise ValueError(f"{path} is a damaged MixMeister playlist ({error})") from error
 
     return playlist
 
@@ -306,15 +385,15 @@ def format_playlist(playlist: Playlist) -> str:
 
     for number, track in enumerate(playlist.tracks, start=1):
         lines.append("")
-        lines.append(f"track {number}: {track.path or '(no path)'}")
+        lines.append(f"track {number}: {_visible(track.path) if track.path else '(no path)'}")
         lines.append(
             f"  original BPM {track.original_bpm:.3f}"
             f"   bar period implies {track.bar_period_bpm:.2f} BPM"
         )
         if track.transition_in:
-            lines.append(f"  transition in:  {track.transition_in}")
+            lines.append(f"  transition in:  {_visible(track.transition_in)}")
         if track.transition_out:
-            lines.append(f"  transition out: {track.transition_out}")
+            lines.append(f"  transition out: {_visible(track.transition_out)}")
         lines.append(f"  {len(track.beatgrid)} beatgrid markers, {len(track.spans)} spans")
 
         for marker in track.automation:

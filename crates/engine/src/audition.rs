@@ -431,17 +431,16 @@ impl Audition {
     /// one: the audition makes the frames it had ready ahead again, in
     /// place, under the same lock it reads the position under, and a block
     /// the making thread built under the old grid is never delivered after
-    /// that. No frame is lost or repeated and no pull comes up short
-    /// because of the call. The call
-    /// does not wait for the device: it returns within the time it takes
-    /// to make one lookahead of frames, so the window may call it on every
-    /// move of a drag and on every repeat of a held key. A grid whose
-    /// tempo is outside the range from [`Bpm::LOWEST`] to [`Bpm::HIGHEST`]
-    /// beats per minute is refused whatever the audition's state: nothing
-    /// changes and nothing is returned. Once the
-    /// audition has ended or failed no more frames are made, so the grid
-    /// is taken and the returned frame is the position, which after the
-    /// end is the track's length.
+    /// that. No frame is lost or repeated and no pull comes up short because
+    /// of the call. The call does not wait for the device: it returns within
+    /// the time it takes to make one lookahead of frames, so the window may
+    /// call it on every move of a drag and on every repeat of a held key. A
+    /// grid whose tempo is outside the range from [`Bpm::LOWEST`] to
+    /// [`Bpm::HIGHEST`] beats per minute is refused whatever the audition's
+    /// state: nothing changes and nothing is returned. Once the audition has
+    /// ended or failed no more frames are made, so the grid is taken and the
+    /// returned frame is the position, which after the end is the track's
+    /// length.
     pub fn set_grid(&mut self, grid: BeatGrid) -> Option<Samples> {
         if !grid.bpm.is_valid() {
             return None;

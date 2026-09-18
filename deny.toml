@@ -1,7 +1,9 @@
-# The licenses a dependency may carry. `cargo deny check licenses` fails the
-# build when a crate in the dependency graph carries a license that is not on
-# this list, so a dependency that the GPL-3.0-or-later cannot combine with
-# is caught before it is merged. Continuous integration runs the check.
+# This file configures `cargo deny check`. The check covers licenses,
+# advisories, bans, and sources. A crate in the dependency graph must carry
+# an allowed license. It must not carry a known vulnerability or an
+# unmaintained-crate advisory without a recorded reason. It must not appear
+# as an unpinned wildcard dependency. It must come from a known registry or
+# git source. Continuous integration runs the check.
 
 [graph]
 all-features = true
@@ -9,7 +11,7 @@ all-features = true
 [licenses]
 allow = [
     "GPL-3.0-or-later",
-    "LGPL-3.0",
+    "LGPL-3.0-only",
     "MIT",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
@@ -25,9 +27,37 @@ allow = [
 ]
 confidence-threshold = 0.8
 
+# mp3lame-encoder and mp3lame-sys both declare the deprecated identifier
+# LGPL-3.0 in their Cargo.toml, which cargo-deny cannot parse: SPDX replaced
+# it with LGPL-3.0-only. Each block restates the crate's own declaration in
+# its current spelling, against the LICENSE file each crate ships.
+[[licenses.clarify]]
+name = "mp3lame-encoder"
+expression = "LGPL-3.0-only"
+license-files = [{ path = "LICENSE", hash = 0xdb3c2abe }]
+
+[[licenses.clarify]]
+name = "mp3lame-sys"
+expression = "LGPL-3.0-only"
+license-files = [{ path = "LICENSE", hash = 0xdb3c2abe }]
+
+[advisories]
+# Every crate in the graph carrying a RUSTSEC advisory needs either a fixed
+# version or an entry here saying why none applies.
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "dermixen-library depends on lofty, which depends on paste. The author of paste archived paste, so no release of lofty can drop it." },
+    { id = "RUSTSEC-2026-0194", reason = "dermixen-app depends on eframe, whose Linux accessibility support depends on zbus_xml through zbus-lockstep and atspi-common. The defect this advisory describes is in quick-xml 0.38, and zbus_xml requires quick-xml ^0.38." },
+    { id = "RUSTSEC-2026-0195", reason = "dermixen-app depends on eframe, whose Linux accessibility support depends on zbus_xml through zbus-lockstep and atspi-common. The defect this advisory describes is in quick-xml 0.38, and zbus_xml requires quick-xml ^0.38." },
+    { id = "RUSTSEC-2026-0192", reason = "dermixen-app depends on eframe, which depends on winit, which depends on sctk-adwaita, which depends on ab_glyph, which depends on owned_ttf_parser, which depends on ttf-parser. The author of ttf-parser has stated that ttf-parser is unmaintained." },
+]
+
 [bans]
-multiple-versions = "allow"
-wildcards = "allow"
+multiple-versions = "warn"
+wildcards = "deny"
+# The workspace's own crates depend on each other with `workspace = true` and
+# no version, which the wildcard check would otherwise flag. This exempts
+# path dependencies inside the workspace, not a dependency on crates.io.
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"

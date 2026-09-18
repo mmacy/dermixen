@@ -13,7 +13,7 @@ What you hear in the window is what a render writes, because preview and render 
 
 ## Prerequisites
 
-- Rust 1.95 or newer. `rustup update stable` brings a toolchain up to date.
+- `rust-toolchain.toml` names the toolchain the workspace builds with, and `rustup` installs it on the first cargo command. The window needs at least Rust 1.95, because it is built on `eframe` 0.36.
 - A C and C++ compiler, and `make`. The build compiles three vendored libraries (the Signalsmith stretcher, the aubio beat tracker, and libkeyfinder) from source, and builds the LAME MP3 encoder with its own configure script and `make`. On macOS, the Xcode command line tools provide all of them.
 - On Linux, the ALSA development headers, which the build needs for audio output: the `libasound2-dev` package on Debian and Ubuntu.
 
@@ -25,11 +25,11 @@ cargo build --release --workspace
 
 The two executables land in `target/release/`: `dermixen` and `dermixen-app`. `dermixen open` starts the window from the folder that contains the command, so keep the two together. The window is slow in a debug build, so build it with `--release`.
 
-`scripts/check.sh` runs the formatting check, the lints, and every test in the workspace. Continuous integration runs those three on Linux and macOS, and `cargo deny check licenses sources` against `deny.toml`, for every push to `main` and every pull request.
+`scripts/check.sh` runs the formatting check, the lints, and every test in the workspace. Continuous integration runs those three on Linux and macOS, and `cargo deny check` against `deny.toml`, for every push to `main` and every pull request. That check covers licenses, security advisories, dependency bans, and dependency sources.
 
 ## The starter library
 
-The window builds its first library from `~/Music/Undefunktis` when it opens and finds no library file. That folder is empty until `scripts/install-starter-tracks.sh` puts five tracks by Undefunktis there, about 70 megabytes in all. The tracks are by [Undefunktis](https://undefunktis.bandcamp.com/) and are licensed under the [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 license](https://creativecommons.org/licenses/by-nc-sa/4.0/), which is their license and not the app's. The folder is the `music_folder` setting, so it can name any folder instead.
+The window builds its first library from `~/Music/Undefunktis` when it opens and finds no library file. That folder is empty until `scripts/install-starter-tracks.sh` puts five tracks by Undefunktis there, about 70 megabytes in all. The script checks each download against a SHA-256 digest recorded in the script itself and deletes and reports a download that does not match. The tracks are by [Undefunktis](https://undefunktis.bandcamp.com/) and are licensed under the [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 license](https://creativecommons.org/licenses/by-nc-sa/4.0/), which is their license and not the app's. The folder is the `music_folder` setting, so it can name any folder instead.
 
 ```
 scripts/install-starter-tracks.sh

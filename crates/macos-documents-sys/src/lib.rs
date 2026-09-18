@@ -1,5 +1,3 @@
-#![allow(unsafe_code)]
-
 //! The documents macOS asks the app to open, handed to the window as paths.
 //!
 //! When a person double-clicks a `.dmx` file in the Finder, or drops one on
@@ -15,9 +13,10 @@
 //!
 //! The crates that make up the app itself forbid unsafe code, so the calls
 //! into the Objective-C runtime sit here, in a file short enough to read in
-//! one sitting. The other three crates that allow unsafe code are the
-//! wrappers around the time-stretcher, the beat tracker, and the key
-//! detector.
+//! one sitting. Four crates allow unsafe code: `signalsmith-sys` around the
+//! time-stretcher, `aubio-sys` around the beat tracker, `keyfinder-sys` around
+//! the key detector, and `macos-documents-sys` around the documents macOS asks
+//! the app to open.
 
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
@@ -68,7 +67,7 @@ mod apple_events {
     use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
     use objc2_app_kit::NSApplicationWillFinishLaunchingNotification;
     use objc2_foundation::{
-        NSAppleEventDescriptor, NSAppleEventManager, NSNotification, NSNotificationCenter,
+        NSAppleEventDescriptor, NSAppleEventManager, NSNotification, NSNotificationCenter, NSURL,
     };
 
     /// An Apple event is named by four characters, which the Objective-C
@@ -194,6 +193,17 @@ mod apple_events {
     /// the URL names no path.
     fn path_of(file: &NSAppleEventDescriptor) -> Option<PathBuf> {
         let url = file.fileURLValue()?;
+        path_of_url(&url)
+    }
+
+    /// The path a file URL names, or nothing for a URL of any other scheme.
+    /// The path of `https://example.com/x.dmx` is `/x.dmx`, which names a
+    /// file nobody asked the app to open, so a URL that is not a file URL is
+    /// turned away before its path is read.
+    pub(crate) fn path_of_url(url: &NSURL) -> Option<PathBuf> {
+        if !url.isFileURL() {
+            return None;
+        }
         let path = url.path()?;
         Some(PathBuf::from(path.to_string()))
     }
@@ -260,5 +270,31 @@ mod apple_events {
         // the block, and the handler the block holds, until a call to
         // `removeObserver:`, so the token here is of no further use.
         drop(observer);
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::path::PathBuf;
+
+        use objc2_foundation::{NSString, NSURL};
+
+        use super::path_of_url;
+
+        #[test]
+        fn a_file_url_names_its_path() {
+            let url = NSURL::fileURLWithPath(&NSString::from_str("/Users/dermixenuser/set.dmx"));
+            assert_eq!(
+                path_of_url(&url),
+                Some(PathBuf::from("/Users/dermixenuser/set.dmx"))
+            );
+        }
+
+        #[test]
+        fn a_url_of_another_scheme_names_no_path() {
+            for text in ["https://example.com/x.dmx", "ftp://example.com/etc/passwd"] {
+                let url = NSURL::URLWithString(&NSString::from_str(text)).unwrap();
+                assert_eq!(path_of_url(&url), None, "{text}");
+            }
+        }
     }
 }

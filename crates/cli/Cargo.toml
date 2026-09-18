@@ -30,7 +30,7 @@ tempfile = "3"
 [dev-dependencies]
 dermixen-testkit.workspace = true
 hound = "3.5.1"
-jsonschema = "0.56"
+jsonschema = { version = "0.56", default-features = false }
 
 [features]
 default = ["signalsmith", "aubio", "keyfinder", "playback", "mp3"]

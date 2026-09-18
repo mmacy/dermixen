@@ -26,6 +26,7 @@
 //! recording every pull with its position and comparing each with the
 //! render of the same document at the same position.
 
+use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
@@ -36,7 +37,8 @@ use dermixen_core::{
 
 use crate::preview::{Channel, Feed, Output};
 use crate::render::{
-    BLOCK_FRAMES, Handover, RenderError, Source, mix_length, render_carrying, track_spans,
+    BLOCK_FRAMES, Handover, RenderError, Source, mix_length, panic_message, render_carrying,
+    track_spans,
 };
 use crate::stretch::TimeStretcher;
 
@@ -60,9 +62,11 @@ pub enum TransportState {
     /// moved, or given a document at or past the length.
     Ended,
     /// The preview stopped on an error, with the text a person should read:
-    /// what the loader said about a track it could not provide, or the
+    /// what the loader said about a track it could not provide, the
     /// message the output gave [`Feed::fail`](crate::Feed::fail) when its
-    /// device stopped taking frames. The frames rendered ahead
+    /// device stopped taking frames, or the words of
+    /// [`RenderError::Defect`] when the render panicked, which is a defect
+    /// in dermixen rather than anything a person did. The frames rendered ahead
     /// of the failure are thrown away, the device plays silence from the
     /// next pull on, the position holds, the other controls change nothing,
     /// and only [`stop`](Transport::stop) ends it.
@@ -288,38 +292,51 @@ fn render_runs(
                 orders = waking.wait(orders).unwrap();
             }
         };
-        let rendered = render_carrying(
-            &run.mix,
-            Samples(run.from)..Samples(run.until),
-            &mut *load,
-            &mut *stretchers,
-            &mut |block| channel.deliver(block, run.run),
-            &mut |_| {},
-            &mut |asking_again| {
-                let mut orders = waiting.lock().unwrap();
-                // A run the transport has abandoned is about to end, so it
-                // takes no document, and the frame it would publish belongs
-                // to no run the transport is waiting on.
-                if orders.run != run.run {
-                    return None;
-                }
-                orders.boundary = asking_again.map(|at| Boundary { run: run.run, at });
-                orders.handover.take()
-            },
-        );
-        match rendered {
-            Ok(_) => channel.delivered(run.run),
-            Err(error) => {
-                // A run the transport abandoned ends with an error from the
-                // feed, and a device that stopped taking frames has already
-                // said why in words of its own. Anything else is what a
-                // person needs to read about why the preview stopped, and
-                // recording it in the feed throws away the frames rendered
-                // ahead of it as well.
-                if channel.run() == run.run && channel.failure().is_none() {
-                    channel.fail(&error.to_string());
-                }
+        // A panic in the render would otherwise end this thread and leave the
+        // device pulling a feed nothing will fill again, with the status
+        // still saying the transport is playing. Catching it here turns a
+        // defect into a failure the status reports, like every other way a
+        // run can stop. Rust prints the panic and the line it happened on to
+        // standard error before the unwinding reaches this point.
+        let rendered = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            render_carrying(
+                &run.mix,
+                Samples(run.from)..Samples(run.until),
+                &mut *load,
+                &mut *stretchers,
+                &mut |block| channel.deliver(block, run.run),
+                &mut |_| {},
+                &mut |asking_again| {
+                    let mut orders = waiting.lock().unwrap();
+                    // A run the transport has abandoned is about to end, so it
+                    // takes no document, and the frame it would publish belongs
+                    // to no run the transport is waiting on.
+                    if orders.run != run.run {
+                        return None;
+                    }
+                    orders.boundary = asking_again.map(|at| Boundary { run: run.run, at });
+                    orders.handover.take()
+                },
+            )
+        }));
+        // A run the transport abandoned ends with an error from the feed, and
+        // a device that stopped taking frames has already said why in words
+        // of its own. Anything else is what a person needs to read about why
+        // the preview stopped, and recording it in the feed throws away the
+        // frames rendered ahead of it as well.
+        let stopped_by = match rendered {
+            Ok(Ok(_)) => {
+                channel.delivered(run.run);
+                None
             }
+            Ok(Err(error)) => Some(error.to_string()),
+            Err(payload) => Some(RenderError::Defect(panic_message(payload.as_ref())).to_string()),
+        };
+        if let Some(message) = stopped_by
+            && channel.run() == run.run
+            && channel.failure().is_none()
+        {
+            channel.fail(&message);
         }
     }
 }
