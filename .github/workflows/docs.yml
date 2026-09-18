@@ -38,7 +38,7 @@ jobs:
         run: uv sync --frozen
       - name: uv run mkdocs build --strict
         run: uv run mkdocs build --strict
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
