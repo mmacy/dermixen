@@ -55,6 +55,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+# The Discogs API, as the address every request in this module is built
+# from. `discogs_year.py` builds its own requests from the same constant.
+API = "https://api.discogs.com"
+
 # Where the library index sits by default. The Discogs collection export has
 # no default, because `match` takes it as a required argument.
 LIBRARY = os.path.expanduser("~/.cache/dermixen/library/library.sqlite")
@@ -81,6 +85,95 @@ SECONDS_BETWEEN_REQUESTS = 1.0
 
 # Discogs refuses a request that does not name the program making it.
 USER_AGENT = "DermixenReleaseMatcher/1.0 +https://github.com/mmacy/dermixen"
+
+
+class _RefuseCrossHostRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuses a redirect that points at a different host or port.
+
+    A request built here carries the Discogs `Authorization` header, and
+    `urllib` forwards every header, that one included, when it follows a
+    redirect on its own. Refusing a redirect that changes the host or the
+    port keeps the header from ever reaching a host it was not made for.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        before = urllib.parse.urlsplit(req.full_url)
+        after = urllib.parse.urlsplit(newurl)
+        if (before.hostname, before.port) != (after.hostname, after.port):
+            return None
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_RefuseCrossHostRedirect)
+
+
+def open_request(request: urllib.request.Request, timeout: float = 30):
+    """Send `request` through the opener that refuses a cross-host redirect.
+
+    Both Discogs tools send every request through this function rather than
+    through `urllib.request.urlopen` directly, so that neither can be made to
+    hand its credentials to a host Discogs never named.
+    """
+    return _OPENER.open(request, timeout=timeout)
+
+
+def as_text(value) -> str:
+    """`value` as text, or the empty string when it is not text.
+
+    A Discogs answer sometimes puts a number, a list, or an object where the
+    format calls for a name or a title. None of those state text this
+    function will guess at, so each becomes the empty string instead of
+    crashing whatever reads the result as a string.
+    """
+    return value if isinstance(value, str) else ""
+
+
+def as_label_list(value) -> list[str]:
+    """Every label name a Discogs `label` field gives, as a list of text.
+
+    The field is normally a list of names. Some answers give a single string
+    instead, and that whole string is the one label name, never split into
+    its characters. A value that is neither becomes an empty list.
+    """
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str)]
+    return []
+
+
+def as_year_or(value, default: int) -> int:
+    """The year a Discogs `year` field names, or `default` when it names none
+    plainly, as when the field holds a roman numeral, a list, or nothing."""
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return default
+
+
+def escaped_like(fragment: str) -> str:
+    """`fragment` with SQLite's `LIKE` wildcards escaped, so a folder name
+    that happens to contain `%` or `_` is matched literally rather than as a
+    wildcard. Pass it to a query that also gives `LIKE` the clause
+    `ESCAPE '\\'`."""
+    return fragment.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def cell(value):
+    """`value` as a spreadsheet cannot mistake for a formula.
+
+    A text value that begins with `=`, `+`, `-`, `@`, a tab, or a carriage
+    return is a formula to a spreadsheet that opens the CSV this module
+    writes, and this returns it with a single quote in front instead, which
+    every common spreadsheet program reads back as the original text. Any
+    other value, text or not, is returned unchanged.
+    """
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return f"'{value}"
+    return value
 
 
 def normalized(catalog_number: str) -> str:
@@ -213,17 +306,23 @@ def search_releases(catalog_number: str, auth: tuple[str, str]) -> list[dict]:
 
     Raises [`RateLimited`][tools.discogs_release.RateLimited] when Discogs
     answers 429, so that a run stops rather than pushing at a closed door.
+
+    Returns:
+        Every result the answer's `results` field gives, keeping only the
+        entries that are themselves objects. An answer of the wrong shape,
+        such as `results` holding text instead of a list, gives no results
+        rather than raising.
     """
     query = urllib.parse.urlencode({"catno": catalog_number, "type": "release"})
     request = urllib.request.Request(
-        f"https://api.discogs.com/database/search?{query}",
+        f"{API}/database/search?{query}",
         headers={
             "User-Agent": USER_AGENT,
             "Authorization": f"Discogs key={auth[0]}, secret={auth[1]}",
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=30) as answer:
+        with open_request(request) as answer:
             remaining = answer.headers.get("X-Discogs-Ratelimit-Remaining")
             body = json.load(answer)
     except urllib.error.HTTPError as problem:
@@ -231,10 +330,16 @@ def search_releases(catalog_number: str, auth: tuple[str, str]) -> list[dict]:
             raise RateLimited(catalog_number) from problem
         raise
     # Discogs counts down the requests left in the current window. Stopping
-    # while a few remain leaves room for whatever else uses this account.
-    if remaining is not None and int(remaining) < 5:
+    # while a few remain leaves room for whatever else uses this account. A
+    # header that does not name a number is treated as not counting down.
+    try:
+        low_on_requests = remaining is not None and int(remaining) < 5
+    except ValueError:
+        low_on_requests = False
+    if low_on_requests:
         raise RateLimited(catalog_number)
-    return body.get("results", [])
+    results = body.get("results") if isinstance(body, dict) else None
+    return [result for result in results if isinstance(result, dict)] if isinstance(results, list) else []
 
 
 def result_artist_and_title(result: dict) -> tuple[str, str]:
@@ -243,8 +348,9 @@ def result_artist_and_title(result: dict) -> tuple[str, str]:
     A result writes both into one field as `Artist - Title`. Discogs tells two
     acts of the same name apart by a number after the name, as in `Brass (8)`,
     and that number is dropped here so the name compares against a folder's.
+    A `title` field that is not text gives an empty artist and an empty title.
     """
-    artist, separator, title = result.get("title", "").partition(" - ")
+    artist, separator, title = as_text(result.get("title")).partition(" - ")
     if not separator:
         return "", artist.strip()
     return re.sub(r"\s*\(\d+\)$", "", artist.strip()), title.strip()
@@ -279,7 +385,7 @@ def from_search(
     exact = [
         result
         for result in results
-        if normalized(result.get("catno") or "") == wanted
+        if normalized(as_text(result.get("catno"))) == wanted
     ]
     if not exact:
         return None
@@ -293,11 +399,13 @@ def from_search(
     titles = {comparable(result_artist_and_title(result)[1]) for result in exact}
     if len(titles) > 1:
         return None
-    earliest = min(exact, key=lambda result: int(result.get("year") or 9999))
-    labels = earliest.get("label") or []
+    # A year that does not name a plain number, such as a roman numeral, sorts
+    # last rather than first, so it never wins a release that has a real year.
+    earliest = min(exact, key=lambda result: as_year_or(result.get("year"), 9999))
+    labels = as_label_list(earliest.get("label"))
     return {
         "label": labels[0] if labels else "",
-        "catalog_number": (earliest.get("catno") or "").strip(),
+        "catalog_number": as_text(earliest.get("catno")).strip(),
         "title": result_artist_and_title(earliest)[1],
         "release_id": str(earliest.get("id", "")),
     }
@@ -489,7 +597,7 @@ def run_match(args: argparse.Namespace) -> int:
     with open(args.out, "w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=FIELDS)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows({key: cell(value) for key, value in row.items()} for row in rows)
     resolved = counts["export"] + counts["title"] + counts["api"]
     tracks = sum(row["tracks"] for row in rows if row["data_source"])
     print(
@@ -522,7 +630,8 @@ def run_apply(args: argparse.Namespace) -> int:
             paths = [
                 path
                 for (path,) in connection.execute(
-                    "SELECT path FROM tracks WHERE path LIKE ?", (row["folder"] + "/%",)
+                    "SELECT path FROM tracks WHERE path LIKE ? ESCAPE '\\'",
+                    (escaped_like(row["folder"]) + "/%",),
                 )
                 if release_folder(path) == row["folder"]
             ]

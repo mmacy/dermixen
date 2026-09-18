@@ -27,6 +27,8 @@ python3 tools/mmp_dump.py --json "some playlist.mmp"
 
 It needs nothing beyond a Python 3 interpreter. The readable output gives one block per track. The JSON output gives the same information in full, which is the more useful form for feeding another program.
 
+A damaged playlist, one whose chunks nest too deep or whose declared sizes do not match the bytes the file holds, is reported in one line on standard error naming the file, and the program exits with status 1 rather than crashing. A file over 64 MB is refused the same way before it is read, since the largest real playlist is under 1 MB. The readable output escapes a control character found in a path or a transition name, such as an escape or a bell, as `\xHH`, so a hostile file cannot act on the terminal printing it. The JSON output leaves the character as it is, since JSON already escapes it.
+
 ### What the format looks like
 
 A `.mmp` file is a RIFF container whose form type is `MXMP`. Inside, a `LIST` of type `TRKL` contains the playlist, and each track is a `LIST` of type `TRKI`. Within a track:
@@ -180,6 +182,8 @@ Where they do not agree the folder is left for the API. The Doof folder `[TIPCD1
 `apply` reads the CSV and writes the release columns of every track under each resolved folder. The track number comes from the leading number in the file's name rather than from Discogs, so on a release spread over two discs it is the position on the disc: both `CD1/01` and `CD2/01` store 1.
 
 `discogs_release.py` and `discogs_year.py` both refuse a library file whose layout version is not the one `crates/library/src/index.rs` writes, and name the version they found.
+
+Both tools build every request against the address in the module constant `API` and never follow a redirect that changes the host or the port, so the consumer key and secret never reach anywhere Discogs did not name. Neither crashes on an answer of the wrong shape, such as a rate-limit header that is not a number or a `results` field that is not a list. A text value that begins with `=`, `+`, `-`, `@`, a tab, or a carriage return, and so could open as a formula in a spreadsheet, is written to the CSV with a leading single quote instead.
 
 ## discogs_year.py
 
