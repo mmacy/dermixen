@@ -319,8 +319,8 @@ pub enum EditError {
         /// The outro anchor.
         outro: Beats,
     },
-    /// A tempo is not a positive finite number.
-    #[error("a tempo must be a positive finite number, not {}", bpm.0)]
+    /// A tempo is not one a document may contain.
+    #[error("a tempo must be from {} to {} beats per minute, not {}", Bpm::LOWEST.0, Bpm::HIGHEST.0, bpm.0)]
     InvalidTempo {
         /// The tempo given.
         bpm: Bpm,
@@ -412,13 +412,20 @@ fn keep_nodes(envelope: &mut Envelope, keep: impl Fn(Beats) -> bool) {
 /// Moves by `by` beats every node of an envelope whose beat `moves`
 /// accepts, and leaves the rest where they are. A moved node that lands on
 /// the exact beat of a node that did not move replaces it.
-fn move_nodes(envelope: &mut Envelope, moves: impl Fn(Beats) -> bool, by: Beats) {
+///
+/// A node that lands on a beat that is not a finite number is refused as an
+/// invalid node, which the beats of a mix [`Mix::check`] accepts cannot
+/// produce: a beat of at most [`MAX_BEAT`](crate::MAX_BEAT) moved by the
+/// distance between two such beats stays far inside the range of an `f64`.
+fn move_nodes(
+    envelope: &mut Envelope,
+    moves: impl Fn(Beats) -> bool,
+    by: Beats,
+) -> Result<(), EditError> {
     let mut after = Envelope::new();
     for node in envelope.nodes() {
         if !moves(node.at) {
-            after
-                .insert(*node)
-                .expect("an envelope holds only finite nodes");
+            after.insert(*node).map_err(|_| EditError::InvalidNode)?;
         }
     }
     for node in envelope.nodes() {
@@ -428,10 +435,11 @@ fn move_nodes(envelope: &mut Envelope, moves: impl Fn(Beats) -> bool, by: Beats)
                     at: node.at + by,
                     value: node.value,
                 })
-                .expect("a finite beat moved by a finite distance is finite");
+                .map_err(|_| EditError::InvalidNode)?;
         }
     }
     *envelope = after;
+    Ok(())
 }
 
 /// Moves a track's tempo nodes by the rule [`move_nodes`] follows for an
@@ -456,10 +464,23 @@ fn move_tempo_nodes(tempo: &mut Vec<TempoNode>, moves: impl Fn(Beats) -> bool, b
 
 /// Moves one anchor of a track and takes the nodes of that anchor's
 /// transition along with it.
-fn move_anchor(track: &mut Track, anchor: Anchor, to: Beats) -> Result<(), EditError> {
+fn move_anchor(
+    track: &mut Track,
+    index: usize,
+    anchor: Anchor,
+    to: Beats,
+) -> Result<(), EditError> {
     if !to.is_whole() {
         return Err(EditError::NotAWholeBeat { beat: to });
     }
+    // The beat is held to the document's limits before any node moves,
+    // because the distance every node travels is measured from it.
+    let field = match anchor {
+        Anchor::Intro => "intro_beat",
+        Anchor::Outro => "outro_beat",
+    };
+    crate::mix::check_beat(format!("tracks[{index}].anchors.{field}"), to)
+        .map_err(EditError::OutOfRange)?;
     let anchors = track.anchors;
     let (from, moved) = match anchor {
         Anchor::Intro => (
@@ -503,7 +524,7 @@ fn move_anchor(track: &mut Track, anchor: Anchor, to: Beats) -> Result<(), EditE
 
     let by = to - from;
     for envelope in every_envelope(track) {
-        move_nodes(envelope, belongs, by);
+        move_nodes(envelope, belongs, by)?;
     }
     move_tempo_nodes(&mut track.tempo, belongs, by);
     track.anchors = moved;
@@ -534,7 +555,7 @@ fn set_grid(track: &mut Track, grid: BeatGrid) -> Result<(), EditError> {
                     at: regrid(node.at),
                     value: node.value,
                 })
-                .expect("a finite beat on a grid of positive finite tempo stays finite");
+                .map_err(|_| EditError::InvalidNode)?;
         }
         *envelope = after;
     }
@@ -578,6 +599,10 @@ fn insert_track(mix: &mut Mix, at: usize, track: &Track, preset: Preset) -> Resu
             outro: anchors.outro,
         });
     }
+    // The new track is held to the document's limits before a preset writes
+    // anything, because a preset places its nodes from the track's anchors,
+    // its grid, and its length.
+    crate::mix::check_track(at, track).map_err(EditError::OutOfRange)?;
     // Each transition about to be written has an outgoing track: the track
     // before this one, and this one itself when a track follows it. Both are
     // held to the rule before any node is written, so a transition that will
@@ -622,10 +647,31 @@ fn insert_track(mix: &mut Mix, at: usize, track: &Track, preset: Preset) -> Resu
 
 /// Makes the change `edit` describes to `mix`, or refuses it and leaves the
 /// mix exactly as it was.
+///
+/// The change is made on a copy, which becomes the mix only once
+/// [`Mix::check`] accepts it, so an edit that would put a number outside the
+/// limits of a document, or make a mix longer than
+/// [`LONGEST_MIX`](crate::LONGEST_MIX), comes back as
+/// [`EditError::OutOfRange`] with the field named and the mix untouched. A
+/// mix that [`Mix::check`] already refuses is refused the same way before the
+/// edit is tried, since a document outside the limits has no layout to edit.
+/// Between those two checks, no edit panics, whatever numbers it holds.
 pub fn apply_edit(mix: &mut Mix, edit: &Edit) -> Result<(), EditError> {
+    mix.check().map_err(EditError::OutOfRange)?;
+    let mut next = mix.clone();
+    apply_to(&mut next, edit)?;
+    next.check().map_err(EditError::OutOfRange)?;
+    *mix = next;
+    Ok(())
+}
+
+/// Makes the change `edit` describes, leaving the mix as far along as the
+/// change got when it is refused. [`apply_edit`] is what callers use: it
+/// works on a copy, so a refusal here never reaches the caller's mix.
+fn apply_to(mix: &mut Mix, edit: &Edit) -> Result<(), EditError> {
     match edit {
         Edit::MoveAnchor { track, anchor, to } => {
-            move_anchor(track_at(&mut mix.tracks, *track)?, *anchor, *to)
+            move_anchor(track_at(&mut mix.tracks, *track)?, *track, *anchor, *to)
         }
         Edit::AddNode { track, curve, node } => {
             let node = *node;

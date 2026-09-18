@@ -441,7 +441,6 @@ fn check_refused_fixtures(folder: &str) -> usize {
 }
 
 #[test]
-#[ignore = "document-bounds"]
 fn every_out_of_range_fixture_reports_its_expected_error() {
     assert_eq!(check_refused_fixtures("out-of-range"), 18);
 }
@@ -466,7 +465,6 @@ fn a_track_on_the_limits(bpm: f64, first_beat: i64, gain: f64, beat: f64) -> Str
 }
 
 #[test]
-#[ignore = "document-bounds"]
 fn a_value_exactly_on_its_limit_is_accepted() {
     for (bpm, first_beat, gain) in [(20.0, 238_140_000, 24.0), (999.0, -238_140_000, -144.0)] {
         let text = a_track_on_the_limits(bpm, first_beat, gain, 10_000_000.0);
@@ -479,7 +477,6 @@ fn a_value_exactly_on_its_limit_is_accepted() {
 }
 
 #[test]
-#[ignore = "document-bounds"]
 fn one_track_slowed_past_a_day_is_refused_as_too_long() {
     // Ninety minutes of audio at 999 beats per minute, played at 20, lasts almost 75 hours.
     let text = a_track_on_the_limits(999.0, 0, 0.0, 0.0).replace(
@@ -495,7 +492,6 @@ fn one_track_slowed_past_a_day_is_refused_as_too_long() {
 }
 
 #[test]
-#[ignore = "document-bounds"]
 fn checked_json_is_the_text_of_a_mix_that_reads_back() {
     let mix = Mix::from_json(&read_fixture("valid/two-tracks.dmx")).unwrap();
     assert_eq!(mix.check(), Ok(()));
@@ -504,7 +500,6 @@ fn checked_json_is_the_text_of_a_mix_that_reads_back() {
 }
 
 #[test]
-#[ignore = "document-bounds"]
 fn checked_json_refuses_a_mix_that_would_not_read_back() {
     let good = Mix::from_json(&read_fixture("valid/two-tracks.dmx")).unwrap();
 
@@ -642,7 +637,6 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(2000))]
 
     #[test]
-    #[ignore = "document-bounds"]
     fn any_document_from_json_accepts_lays_out_and_writes_back(
         tracks in prop::collection::vec(hostile_tracks(), 1..4),
     ) {

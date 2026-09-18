@@ -5,8 +5,10 @@
 //! described in `docs/project-file.md`; the structures here mirror that file
 //! field for field.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
+use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 
 use crate::anchors::Anchors;
@@ -14,7 +16,7 @@ use crate::beat_grid::BeatGrid;
 use crate::envelope::Envelope;
 use crate::hash::ContentHash;
 use crate::tempo::{PlacedTrack, TempoCurve, TempoNode};
-use crate::units::{Beats, Decibels, Samples, Seconds};
+use crate::units::{Beats, Bpm, Decibels, Samples, Seconds};
 
 /// The version of the project file format this crate reads and writes.
 pub const FORMAT_VERSION: u32 = 1;
@@ -211,46 +213,256 @@ fn check_shape(document: &serde_json::Value) -> Result<(), MixFileError> {
     Ok(())
 }
 
-/// Checks the values that JSON itself cannot rule out: a length that is
-/// negative, a tempo that is not a positive finite number, and an anchor that
-/// is not a whole beat.
-fn check_track(index: usize, track: &Track) -> Result<(), MixFileError> {
-    let named = |field: String, message: String| MixFileError {
-        field: format!("tracks[{index}].{field}"),
-        message,
+/// A number as a message states it, in the shortest form that reads back, so
+/// that a value such as 1e308 is six characters rather than three hundred
+/// digits.
+fn shown(value: f64) -> String {
+    format!("{value:?}")
+}
+
+/// Checks that a tempo is one a document may contain, naming the field.
+pub(crate) fn check_tempo(field: String, bpm: Bpm) -> Result<(), MixFileError> {
+    if bpm.is_valid() {
+        return Ok(());
+    }
+    // A tempo of zero or less, and a tempo that is not a number, are named
+    // for what they are rather than for the range they miss, because neither
+    // is a tempo at all.
+    let message = if !bpm.0.is_finite() || bpm.0 <= 0.0 {
+        format!("must be a positive finite tempo, not {}", shown(bpm.0))
+    } else {
+        format!(
+            "must be a tempo from {} to {} beats per minute, not {}",
+            Bpm::LOWEST.0,
+            Bpm::HIGHEST.0,
+            shown(bpm.0)
+        )
     };
+    Err(MixFileError { field, message })
+}
+
+/// Checks that a beat is one a document may contain, naming the field.
+pub(crate) fn check_beat(field: String, beat: Beats) -> Result<(), MixFileError> {
+    if beat.0.is_finite() && beat.0.abs() <= MAX_BEAT.0 {
+        return Ok(());
+    }
+    Err(MixFileError {
+        field,
+        message: format!(
+            "must be a beat from -{limit} to {limit}, not {}",
+            shown(beat.0),
+            limit = MAX_BEAT.0
+        ),
+    })
+}
+
+/// Checks that a gain or an envelope level is one a document may contain,
+/// naming the field.
+pub(crate) fn check_level(field: String, level: Decibels) -> Result<(), MixFileError> {
+    if level.is_level() {
+        return Ok(());
+    }
+    Err(MixFileError {
+        field,
+        message: format!(
+            "must be a level from {} to {} decibels, not {}",
+            Decibels::LOWEST_LEVEL.0,
+            Decibels::HIGHEST_LEVEL.0,
+            shown(level.0)
+        ),
+    })
+}
+
+/// Checks the values of one track that JSON itself cannot rule out: a path
+/// that holds a NUL character, a length past [`LONGEST_TRACK`], a first beat
+/// further than [`LONGEST_TRACK`] from the track's first sample in either
+/// direction, a tempo outside the range from [`Bpm::LOWEST`] to
+/// [`Bpm::HIGHEST`], an anchor that is not a whole beat, a beat past
+/// [`MAX_BEAT`] in either direction, and a gain or an envelope level outside
+/// the range from [`Decibels::LOWEST_LEVEL`] to
+/// [`Decibels::HIGHEST_LEVEL`].
+///
+/// The field of the refusal is the path into a document that the track at
+/// `index` would have, such as `tracks[2].grid.bpm`.
+pub(crate) fn check_track(index: usize, track: &Track) -> Result<(), MixFileError> {
+    let named = |field: &str| format!("tracks[{index}].{field}");
+    if track.path.as_os_str().as_encoded_bytes().contains(&0) {
+        return Err(MixFileError {
+            field: named("path"),
+            message: "must not contain a NUL character".to_owned(),
+        });
+    }
     if track.length < Samples::ZERO {
-        return Err(named(
-            "length_samples".to_owned(),
-            format!("must not be negative, and this one is {}", track.length.0),
-        ));
+        return Err(MixFileError {
+            field: named("length_samples"),
+            message: format!("must not be negative, and this one is {}", track.length.0),
+        });
     }
-    if !track.grid.bpm.is_valid() {
-        return Err(named(
-            "grid.bpm".to_owned(),
-            format!("must be a positive finite number, not {}", track.grid.bpm.0),
-        ));
+    if track.length > LONGEST_TRACK {
+        return Err(MixFileError {
+            field: named("length_samples"),
+            message: format!(
+                "must be at most {} samples, which is ninety minutes, and this one is {}",
+                LONGEST_TRACK.0, track.length.0
+            ),
+        });
     }
+    let first_beat = track.grid.first_beat;
+    if !(-LONGEST_TRACK..=LONGEST_TRACK).contains(&first_beat) {
+        return Err(MixFileError {
+            field: named("grid.first_beat_sample"),
+            message: format!(
+                "must be within {} samples of the track's first sample, which is ninety minutes, and this one is {}",
+                LONGEST_TRACK.0, first_beat.0
+            ),
+        });
+    }
+    check_tempo(named("grid.bpm"), track.grid.bpm)?;
     for (field, beat) in [
         ("anchors.intro_beat", track.anchors.intro),
         ("anchors.outro_beat", track.anchors.outro),
     ] {
         if !beat.is_whole() {
-            return Err(named(
-                field.to_owned(),
-                format!("must be a whole beat, not {}", beat.0),
-            ));
+            return Err(MixFileError {
+                field: named(field),
+                message: format!("must be a whole beat, not {}", shown(beat.0)),
+            });
+        }
+        check_beat(named(field), beat)?;
+    }
+    check_level(named("gain_db"), track.gain)?;
+    for (curve, envelope) in [
+        ("volume", &track.volume),
+        ("eq.low", &track.eq.low),
+        ("eq.mid", &track.eq.mid),
+        ("eq.high", &track.eq.high),
+    ] {
+        for (node_index, node) in envelope.nodes().iter().enumerate() {
+            check_beat(named(&format!("{curve}[{node_index}].beat")), node.at)?;
+            check_level(named(&format!("{curve}[{node_index}].db")), node.value)?;
         }
     }
     for (node_index, node) in track.tempo.iter().enumerate() {
-        if !node.bpm.is_valid() {
-            return Err(named(
-                format!("tempo[{node_index}].bpm"),
-                format!("must be a positive finite number, not {}", node.bpm.0),
-            ));
-        }
+        check_beat(named(&format!("tempo[{node_index}].beat")), node.at)?;
+        check_tempo(named(&format!("tempo[{node_index}].bpm")), node.bpm)?;
     }
     Ok(())
+}
+
+/// A walk over a JSON document that finds a key given twice in one object.
+///
+/// The serde library keeps the last value a repeated key is given, so
+/// `{"version": 2, "version": 1}` would otherwise read as a version 1 file
+/// and a reader would never see the other number. `path` holds the field path
+/// of the value being visited, in the form [`field_path`] builds, and
+/// `repeated` takes the path of the first repeated key the walk finds.
+struct UniqueKeys<'a> {
+    path: &'a mut String,
+    repeated: &'a mut Option<String>,
+}
+
+impl<'de> DeserializeSeed<'de> for UniqueKeys<'_> {
+    type Value = ();
+
+    fn deserialize<D: serde::Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for UniqueKeys<'_> {
+    type Value = ();
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("any JSON value")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
+        let mut seen: HashSet<String> = HashSet::new();
+        let outer = self.path.len();
+        while let Some(key) = map.next_key::<String>()? {
+            if !self.path.is_empty() {
+                self.path.push('.');
+            }
+            self.path.push_str(&key);
+            if !seen.insert(key) && self.repeated.is_none() {
+                *self.repeated = Some(self.path.clone());
+            }
+            map.next_value_seed(UniqueKeys {
+                path: &mut *self.path,
+                repeated: &mut *self.repeated,
+            })?;
+            self.path.truncate(outer);
+        }
+        Ok(())
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
+        let outer = self.path.len();
+        let mut index = 0;
+        loop {
+            self.path.push_str(&format!("[{index}]"));
+            let element = seq.next_element_seed(UniqueKeys {
+                path: &mut *self.path,
+                repeated: &mut *self.repeated,
+            })?;
+            self.path.truncate(outer);
+            if element.is_none() {
+                return Ok(());
+            }
+            index += 1;
+        }
+    }
+
+    fn visit_bool<E>(self, _: bool) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_i64<E>(self, _: i64) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_u64<E>(self, _: u64) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_f64<E>(self, _: f64) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_str<E>(self, _: &str) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_unit<E>(self) -> Result<(), E> {
+        Ok(())
+    }
+}
+
+/// Refuses a document that gives one key twice in an object.
+///
+/// The text has already been read as JSON, so the walk itself finds nothing
+/// wrong with the syntax and the error it could return never comes back.
+fn check_keys(text: &str) -> Result<(), MixFileError> {
+    let mut path = String::new();
+    let mut repeated = None;
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    UniqueKeys {
+        path: &mut path,
+        repeated: &mut repeated,
+    }
+    .deserialize(&mut deserializer)
+    .map_err(|problem| MixFileError {
+        field: String::new(),
+        message: format!("not JSON: {problem}"),
+    })?;
+    match repeated {
+        Some(field) => Err(MixFileError {
+            field,
+            message: "a key may appear once in an object, and this one appears more than once"
+                .to_owned(),
+        }),
+        None => Ok(()),
+    }
 }
 
 impl Mix {
@@ -263,18 +475,27 @@ impl Mix {
     ///
     /// The text must be a JSON object with a `version` of [`FORMAT_VERSION`]
     /// and the fields described in `docs/project-file.md`. Unknown fields,
-    /// missing fields, values of the wrong type, a negative length, a hash
-    /// that is not 64 hexadecimal digits, tempos that are not positive finite
-    /// numbers, anchors that are not whole beats, and envelopes with two
+    /// missing fields, a key given twice in one object, values of the wrong
+    /// type, a hash that is not 64 hexadecimal digits, and envelopes with two
     /// nodes at one beat are all errors, each naming the field. Text that is
     /// not JSON at all gives an error with an empty field and a message that
     /// begins `not JSON`.
+    ///
+    /// Every number is then held to the limits `DESIGN.md` states, which
+    /// [`Mix::check`] applies: a path with no NUL character in it, a length
+    /// and a first beat within [`LONGEST_TRACK`], tempos from [`Bpm::LOWEST`]
+    /// to [`Bpm::HIGHEST`], anchors that are whole beats within [`MAX_BEAT`],
+    /// beats within [`MAX_BEAT`], levels from [`Decibels::LOWEST_LEVEL`] to
+    /// [`Decibels::HIGHEST_LEVEL`], and a mix that lays out no longer than
+    /// [`LONGEST_MIX`]. A document this returns is therefore one the layout,
+    /// the window, and the render can take as it stands.
     pub fn from_json(text: &str) -> Result<Mix, MixFileError> {
         let document: serde_json::Value =
             serde_json::from_str(text).map_err(|problem| MixFileError {
                 field: String::new(),
                 message: format!("not JSON: {problem}"),
             })?;
+        check_keys(text)?;
         check_shape(&document)?;
         let document: Document<Vec<Track>> =
             serde_path_to_error::deserialize(&document).map_err(|problem| MixFileError {
@@ -284,9 +505,7 @@ impl Mix {
         let mix = Mix {
             tracks: document.tracks,
         };
-        for (index, track) in mix.tracks.iter().enumerate() {
-            check_track(index, track)?;
-        }
+        mix.check()?;
         Ok(mix)
     }
 
@@ -294,9 +513,27 @@ impl Mix {
     /// safe to lay out, to write, and to render.
     ///
     /// The error names the first field out of range, as [`Mix::from_json`]
-    /// does. A mix that passes lays out without a panic, and its length is at
-    /// most [`LONGEST_MIX`].
+    /// does. A mix that passes lays out without a panic, and its length from
+    /// its first sample to its last is at most [`LONGEST_MIX`].
     pub fn check(&self) -> Result<(), MixFileError> {
+        for (index, track) in self.tracks.iter().enumerate() {
+            check_track(index, track)?;
+        }
+        // Every anchor and every tempo is now within its limits, so the
+        // layout below cannot reach the panic of Mix::timeline.
+        let Some(timeline) = self.timeline() else {
+            return Ok(());
+        };
+        let length = timeline.end() - timeline.start();
+        if length > LONGEST_MIX {
+            return Err(MixFileError {
+                field: "tracks".to_owned(),
+                message: format!(
+                    "a mix lasts at most 24 hours from its first sample to its last, and these tracks lay out as {:.1} hours",
+                    length.0 / 3_600.0
+                ),
+            });
+        }
         Ok(())
     }
 
@@ -307,10 +544,16 @@ impl Mix {
     /// so no command and no window action replaces a document with one that
     /// cannot be opened again.
     pub fn checked_json(&self) -> Result<String, MixFileError> {
+        self.check()?;
         Ok(self.to_json())
     }
 
     /// Writes the project file text for this mix, indented for reading.
+    ///
+    /// A mix [`Mix::check`] refuses can still be written here, and the text
+    /// is then one [`Mix::from_json`] refuses: the serde library writes a
+    /// number that is not finite as `null`, which no field of a document
+    /// accepts. Use [`Mix::checked_json`] for text that goes to a file.
     pub fn to_json(&self) -> String {
         let document = Document {
             version: FORMAT_VERSION,
@@ -340,9 +583,17 @@ impl Mix {
     ///
     /// Panics if a track's tempo, or the tempo of one of its tempo nodes, is
     /// not a positive finite number, or if an anchor or a tempo node's beat is
-    /// not a finite number. [`Mix::from_json`] refuses a project file that
-    /// holds any of those, so only a mix built in memory from unchecked
-    /// numbers can reach this.
+    /// not a finite number, or if the running sum of anchors reaches a number
+    /// that is not finite. [`Mix::check`] refuses a mix that holds any of
+    /// those, [`Mix::from_json`] runs that check on every file it reads, and
+    /// [`apply_edit`](crate::apply_edit) runs it on every edit it accepts, so
+    /// only a mix built in memory and never checked can reach this.
+    ///
+    /// The sum stays finite and exact for a checked mix. Each track adds the
+    /// difference between two anchors, which is at most twice [`MAX_BEAT`],
+    /// and a sum of whole beats is exact in an `f64` while it stays under two
+    /// to the fifty-third, so a mix would need more than four hundred million
+    /// tracks before the sum lost a beat.
     pub fn timeline(&self) -> Option<Timeline> {
         let first = self.tracks.first()?;
         // The starting node is what makes the first track set the tempo the
