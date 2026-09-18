@@ -484,3 +484,117 @@ fn a_progress_answer_of_false_stops_the_scan_after_that_file() {
     assert_eq!(summary.unchanged, 2);
     assert_eq!(summary.added, 1);
 }
+
+/// A beat analyzer that panics on any track shorter than fifteen seconds, as
+/// a decoder or an analyzer with a defect panics on one hostile file.
+struct PanicsOnShortTracks;
+
+impl dermixen_analysis::BeatAnalyzer for PanicsOnShortTracks {
+    fn name(&self) -> &str {
+        "panics on short tracks"
+    }
+
+    fn analyze(&self, audio: &Audio) -> Result<dermixen_analysis::BeatAnalysis, AnalysisError> {
+        assert!(audio.duration() >= Seconds(15.0), "this track is hostile");
+        dermixen_analysis::BeatAnalyzer::analyze(&beats_at_130(), audio)
+    }
+}
+
+#[test]
+fn a_file_that_panics_the_analysis_fails_alone_and_the_scan_goes_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("music");
+    kicks_file(&root, "01 Etnica - Alien Protein.wav", 130.0);
+    let hostile = root.join("02 Hostile - File.wav");
+    let short = synth::kicks(Bpm(130.0), Seconds(0.5), Seconds(10.0));
+    write_wav(&hostile, &short, WavDepth::Int16).unwrap();
+    kicks_file(&root, "03 Prana - Scarab.wav", 140.0);
+
+    let library = dir.path().join("library.sqlite");
+    let mut index = Index::open(&library).unwrap();
+    let analyzers = Analyzers {
+        beats: &PanicsOnShortTracks,
+        key: None,
+        anchors: &EdgeAnchors,
+        phrases: &CountedPhrases,
+    };
+    for run in 0..2 {
+        let mut seen = Vec::new();
+        let summary = scan_into(
+            &mut index,
+            &root,
+            &ScanOptions::default(),
+            &analyzers,
+            &mut |progress| {
+                seen.push((progress.path.to_path_buf(), progress.change));
+                true
+            },
+        )
+        .unwrap();
+        assert_eq!(summary.failed.len(), 1, "run {run}: {:?}", summary.failed);
+        assert_eq!(summary.failed[0].0, hostile, "run {run}");
+        assert!(
+            summary.failed[0].1.contains("this track is hostile"),
+            "run {run}: {}",
+            summary.failed[0].1
+        );
+        assert_eq!(seen.len(), 3, "run {run}: {seen:?}");
+        assert!(
+            seen.contains(&(hostile.clone(), Change::Failed)),
+            "run {run}"
+        );
+        let (added, unchanged) = if run == 0 { (2, 0) } else { (0, 2) };
+        assert_eq!(
+            (summary.added, summary.unchanged),
+            (added, unchanged),
+            "run {run}"
+        );
+    }
+    assert_eq!(index.len().unwrap(), 2);
+}
+
+#[test]
+fn a_scan_replaces_a_row_it_cannot_read_and_goes_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("music");
+    kicks_file(&root, "01 Etnica - Alien Protein.wav", 130.0);
+    let damaged = kicks_file(&root, "02 Prana - Scarab.wav", 140.0);
+    let library = dir.path().join("library.sqlite");
+    let beats = beats_at_130();
+    let analyzers = Analyzers {
+        beats: &beats,
+        key: None,
+        anchors: &EdgeAnchors,
+        phrases: &CountedPhrases,
+    };
+    let options = ScanOptions::default();
+    let mut index = Index::open(&library).unwrap();
+    let first = scan_into(&mut index, &root, &options, &analyzers, &mut |_| true).unwrap();
+    assert_eq!(first.added, 2);
+    drop(index);
+
+    // A row damaged from outside, and a file that arrives after it in the scan's order.
+    let connection = rusqlite::Connection::open(&library).unwrap();
+    let changed = connection
+        .execute(
+            "UPDATE tracks SET bpm = 'fast' WHERE path = ?1",
+            [damaged.to_str().unwrap()],
+        )
+        .unwrap();
+    assert_eq!(changed, 1);
+    drop(connection);
+    let later = kicks_file(&root, "03 Slinky Wizard - Lunar Juice.wav", 135.0);
+
+    let mut index = Index::open(&library).unwrap();
+    let second = scan_into(&mut index, &root, &options, &analyzers, &mut |_| true).unwrap();
+    assert_eq!(
+        second.failed,
+        [],
+        "the damaged row is not a failure of the file"
+    );
+    assert_eq!((second.added, second.unchanged), (2, 1), "{second:?}");
+    let (records, skipped) = index.query_with_skipped(&Default::default()).unwrap();
+    assert_eq!((records.len(), skipped), (3, 0));
+    assert!(index.get_by_path(&damaged).unwrap().is_some());
+    assert!(index.get_by_path(&later).unwrap().is_some());
+}
