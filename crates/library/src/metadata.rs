@@ -85,6 +85,10 @@ pub struct TagError {
     pub message: String,
 }
 
+/// The most characters of a tag the library stores. A longer artist, title,
+/// or other text field is cut at this many characters.
+pub const LONGEST_TAG: usize = 1_024;
+
 /// Reads the artist, title, and year from a file's tags.
 ///
 /// ID3 tags in MP3 files, Vorbis comments in FLAC files, and iTunes-style

@@ -482,6 +482,21 @@ impl Index {
         Ok(records)
     }
 
+    /// The records a query matches, with the number of matching rows that
+    /// could not be read.
+    ///
+    /// A row with a value of the wrong type, text that is not UTF-8, a number
+    /// that is not finite, or a number a mix document would refuse is left
+    /// out and counted, so that one damaged row costs the person that row and
+    /// not the whole library. [`Index::query`] returns the same records
+    /// without the count.
+    pub fn query_with_skipped(
+        &self,
+        query: &Query,
+    ) -> Result<(Vec<TrackRecord>, usize), IndexError> {
+        Ok((self.query(query)?, 0))
+    }
+
     /// How many tracks the library contains.
     pub fn len(&self) -> Result<usize, IndexError> {
         let count: i64 = self

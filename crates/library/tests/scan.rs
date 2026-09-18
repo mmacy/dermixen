@@ -184,3 +184,37 @@ fn symbolic_links_are_not_followed() {
     let found = scan(root, &ScanOptions::default()).unwrap();
     assert_eq!(found.files, vec![root.join("real/a.mp3")]);
 }
+
+#[test]
+#[ignore = "library-hardening"]
+fn an_exclusion_written_with_two_dots_still_excludes() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("music");
+    std::fs::create_dir_all(&root).unwrap();
+    a_library(&root);
+    let everything = scan(&root, &ScanOptions::default()).unwrap().files.len();
+
+    for exclusion in [
+        PathBuf::from("../music/mixes"),
+        PathBuf::from("comp/../mixes"),
+        PathBuf::from("./mixes/"),
+        root.join("comp").join("..").join("mixes"),
+    ] {
+        let options = ScanOptions {
+            exclude: vec![exclusion.clone()],
+        };
+        let found = scan(&root, &options).unwrap();
+        assert!(
+            found.files.len() < everything,
+            "{exclusion:?} excluded nothing"
+        );
+        assert!(
+            found
+                .files
+                .iter()
+                .all(|path| !path.starts_with(root.join("mixes"))),
+            "{exclusion:?}: {:?}",
+            found.files
+        );
+    }
+}

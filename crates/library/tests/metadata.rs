@@ -259,3 +259,64 @@ fn blank_tag_values_count_as_absent() {
     assert_eq!(found.title, None);
     assert_eq!(found.year, None);
 }
+
+/// A one-second silent WAV file whose RIFF INFO chunk has the title and the
+/// artist given.
+fn wav_with_info(path: &Path, title: &str, artist: &str) {
+    fn chunk(id: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut bytes = id.to_vec();
+        bytes.extend((body.len() as u32).to_le_bytes());
+        bytes.extend(body);
+        if body.len() % 2 == 1 {
+            bytes.push(0);
+        }
+        bytes
+    }
+    let mut format = Vec::new();
+    format.extend(1u16.to_le_bytes()); // PCM
+    format.extend(2u16.to_le_bytes()); // channels
+    format.extend(44_100u32.to_le_bytes());
+    format.extend((44_100u32 * 4).to_le_bytes());
+    format.extend(4u16.to_le_bytes());
+    format.extend(16u16.to_le_bytes());
+    let text = |value: &str| {
+        let mut bytes = value.as_bytes().to_vec();
+        bytes.push(0);
+        bytes
+    };
+    let mut info = b"INFO".to_vec();
+    info.extend(chunk(b"INAM", &text(title)));
+    info.extend(chunk(b"IART", &text(artist)));
+    let mut wave = b"WAVE".to_vec();
+    wave.extend(chunk(b"fmt ", &format));
+    wave.extend(chunk(b"data", &vec![0u8; 44_100 * 4]));
+    wave.extend(chunk(b"LIST", &info));
+    std::fs::write(path, chunk(b"RIFF", &wave)).unwrap();
+}
+
+#[test]
+fn a_wav_info_chunk_gives_the_title_and_the_artist() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tagged.wav");
+    wav_with_info(&path, "Lunar Juice", "Slinky Wizard");
+    let metadata = read_tags(&path).unwrap().unwrap();
+    assert_eq!(metadata.title.as_deref(), Some("Lunar Juice"));
+    assert_eq!(metadata.artist.as_deref(), Some("Slinky Wizard"));
+}
+
+#[test]
+#[ignore = "library-hardening"]
+fn a_tag_of_any_size_is_stored_up_to_the_longest_tag() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("huge-title.wav");
+    // Ten megabytes of a two-byte character, so a cut by bytes would split one.
+    let title = "é".repeat(5 * 1024 * 1024);
+    wav_with_info(&path, &title, &"a".repeat(1_024));
+    for metadata in [read_tags(&path).unwrap().unwrap(), metadata_of(&path)] {
+        let stored = metadata.title.unwrap();
+        assert_eq!(stored.chars().count(), dermixen_library::LONGEST_TAG);
+        assert!(stored.chars().all(|character| character == 'é'));
+        assert_eq!(metadata.artist.unwrap().len(), 1_024);
+    }
+    assert_eq!(dermixen_library::LONGEST_TAG, 1_024);
+}
