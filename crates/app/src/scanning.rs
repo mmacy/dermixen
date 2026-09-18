@@ -53,7 +53,7 @@ pub fn open_the_library(path: &Path) -> Result<Index, String> {
     if let Some(folder) = path.parent()
         && !folder.as_os_str().is_empty()
         && !folder.exists()
-        && let Err(problem) = std::fs::create_dir_all(folder)
+        && let Err(problem) = make_folder(folder)
     {
         return Err(format!(
             "cannot make the library file {}: {problem}",
@@ -61,6 +61,48 @@ pub fn open_the_library(path: &Path) -> Result<Index, String> {
         ));
     }
     Index::open(path).map_err(|problem| problem.to_string())
+}
+
+/// Makes `folder` and the folders above it, leaving one that is already
+/// there as it is, with its permissions.
+///
+/// A folder this makes is read, written, and entered by its owner alone,
+/// which is mode 0700 on macOS and Linux. The window makes folders for the
+/// library file, for the corrections, and for the untitled autosave file,
+/// and what goes in them is the person's own listening and their unsaved
+/// work, so nobody else on the machine reads them. A folder somebody made
+/// before keeps the permissions that person gave it, since this changes no
+/// folder it did not make.
+pub fn make_folder(folder: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(folder)
+}
+
+/// `path` as an absolute path: `path` itself when it is already absolute, and
+/// `path` below the folder the window was started in when it is not, which is
+/// what the `dermixen` command does with the `DERMIXEN_LIBRARY_FILE`
+/// environment variable and with its `--library` option. The file itself need
+/// not exist.
+///
+/// The window reports the library file it opened, and a relative path names
+/// one file from one folder and another file from the next, so the window
+/// resolves the path once and holds the answer. The folder the window was
+/// started in is read only for a path that needs it, so a path in full still
+/// works where that folder has gone.
+pub fn absolute_here(path: &Path) -> Result<PathBuf, String> {
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    let here = std::env::current_dir().map_err(|problem| {
+        format!("The folder this window was started in cannot be read: {problem}")
+    })?;
+    Ok(here.join(path))
 }
 
 /// A scan of one folder into one library file, running on its own thread.

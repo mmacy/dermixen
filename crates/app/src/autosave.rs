@@ -12,11 +12,11 @@
 //! something the project file does not. `docs/window.md` describes what the
 //! person sees. This module is the rules, which are tested without a window.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use dermixen_core::Mix;
+use dermixen_core::files::{LARGEST_DOCUMENT, ReadError, read_text};
 
 /// The folder below the user's data folder that Dermixen keeps its own files
 /// in, which `docs/cli.md` names for the library file.
@@ -60,14 +60,10 @@ pub fn untitled_autosave_path(data_folder: &Path) -> PathBuf {
 /// with [`forget_file`] once the person has said what should become of the
 /// document it holds.
 pub fn offered_untitled(file: &Path) -> Offer {
-    let text = match std::fs::read_to_string(file) {
-        Ok(text) => text,
-        Err(problem) if problem.kind() == std::io::ErrorKind::NotFound => {
-            return Offer::Nothing;
-        }
-        Err(problem) => {
-            return Offer::Unreadable(format!("cannot read {}: {problem}", file.display()));
-        }
+    let text = match read_the_autosave(file) {
+        Read::Text(text) => text,
+        Read::Missing => return Offer::Nothing,
+        Read::Unreadable(problem) => return Offer::Unreadable(problem),
     };
     let autosaved = std::fs::metadata(file)
         .and_then(|about| about.modified())
@@ -91,10 +87,32 @@ pub fn offered_untitled(file: &Path) -> Offer {
     }
 }
 
-/// The temporary file [`write_atomically`] writes through, beside `path`:
-/// the whole name with `.part` appended.
-fn temporary_path(path: &Path) -> PathBuf {
-    beside(path, ".part")
+/// What one reading of an autosave file found.
+enum Read {
+    /// The text the file contains.
+    Text(String),
+    /// There is no file at the path.
+    Missing,
+    /// The file is there and could not be read, with the reason for the
+    /// status line.
+    Unreadable(String),
+}
+
+/// Reads the autosave file at `file`, within the limit every document of the
+/// app is read within.
+///
+/// A path that names a device or a named pipe, and a file larger than
+/// [`dermixen_core::files::LARGEST_DOCUMENT`], are both a file that could not
+/// be read, so a link to `/dev/zero` planted at an autosave's name is
+/// reported at once rather than read until the machine runs out of memory.
+fn read_the_autosave(file: &Path) -> Read {
+    match read_text(file, LARGEST_DOCUMENT) {
+        Ok(text) => Read::Text(text),
+        Err(ReadError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
+            Read::Missing
+        }
+        Err(problem) => Read::Unreadable(problem.to_string()),
+    }
 }
 
 /// A path with `suffix` appended to its whole name rather than substituted
@@ -144,20 +162,18 @@ pub enum Offer {
 /// nothing is offered.
 ///
 /// A missing autosave file is nothing to offer. One that exists but cannot
-/// be read, because a permission is denied or a mount has gone away, is left
-/// where it is and reported, the same as one that cannot be parsed as a mix
-/// document: a person who is not told stands to lose the file's contents to
-/// the next edit, which overwrites it.
+/// be read is left where it is and reported, the same as one that cannot be
+/// parsed as a mix document: a person who is not told stands to lose the
+/// file's contents to the next edit, which overwrites it. A permission that
+/// is denied, a mount that has gone away, a path that names a device or a
+/// named pipe, and a file over
+/// [`dermixen_core::files::LARGEST_DOCUMENT`] are each such a file.
 pub fn offered(project: &Path, current: &Mix) -> Offer {
     let file = autosave_path(project);
-    let text = match std::fs::read_to_string(&file) {
-        Ok(text) => text,
-        Err(problem) if problem.kind() == std::io::ErrorKind::NotFound => {
-            return Offer::Nothing;
-        }
-        Err(problem) => {
-            return Offer::Unreadable(format!("cannot read {}: {problem}", file.display()));
-        }
+    let text = match read_the_autosave(&file) {
+        Read::Text(text) => text,
+        Read::Missing => return Offer::Nothing,
+        Read::Unreadable(problem) => return Offer::Unreadable(problem),
     };
     let autosaved = std::fs::metadata(&file)
         .and_then(|about| about.modified())
@@ -185,9 +201,26 @@ pub fn offered(project: &Path, current: &Mix) -> Offer {
 }
 
 /// Writes `mix` to the autosave file beside `project`, as
-/// [`write_atomically`] writes it.
+/// [`write_file`] writes it.
 pub fn write(project: &Path, mix: &Mix) -> Result<(), String> {
-    write_atomically(&autosave_path(project), &mix.to_json())
+    write_file(&autosave_path(project), mix)
+}
+
+/// Writes `mix` to the autosave file at `file`, which is the file beside a
+/// project file for a mix that has one and the untitled autosave file for a
+/// mix that has none.
+///
+/// A mix [`Mix::check`] refuses is never written: the reason comes back, and
+/// the autosave file goes on holding the document it held, which is a
+/// document the window can open again. The file is written as
+/// [`write_privately`] writes it, so an autosave the window makes is read
+/// and written by its owner alone, whatever the permissions of the project
+/// file beside it.
+pub fn write_file(file: &Path, mix: &Mix) -> Result<(), String> {
+    let text = mix
+        .checked_json()
+        .map_err(|problem| format!("cannot write {}: {problem}", file.display()))?;
+    write_privately(file, &text)
 }
 
 /// Removes the autosave file beside `project`, once the project file contains
@@ -211,29 +244,37 @@ pub fn forget_file(file: &Path) -> Result<(), String> {
 /// Writes `text` to `path` so that the file contains either what it contained
 /// before or the whole of `text`, never part of it.
 ///
-/// The text goes to a temporary file beside `path`, named after it with
-/// `.part` appended, the bytes are flushed from the machine's write cache to
-/// the device, and only then is that file renamed over `path`, which a file
-/// system carries out in one step. A disk that fills up or a machine that
-/// stops partway therefore leaves `path` as it was. A write that fails
+/// The write is [`dermixen_core::files::write_atomically`]: the text goes to
+/// a temporary file beside `path` whose name nobody can predict, the bytes
+/// are flushed from the machine's write cache to the device, and only then is
+/// that file renamed over `path`, which a file system carries out in one
+/// step. A disk that fills up or a machine that stops partway therefore
+/// leaves `path` as it was. A file already at `path` keeps its permissions,
+/// so a document a person made private stays private. A write that fails
 /// removes its temporary file and says why, naming the path.
+///
+/// [`write_privately`] writes a file the window makes for itself, which is
+/// read and written by its owner alone.
 pub fn write_atomically(path: &Path, text: &str) -> Result<(), String> {
-    let temporary = temporary_path(path);
-    let written = (|| -> std::io::Result<()> {
-        let mut file = std::fs::File::create(&temporary)?;
-        file.write_all(text.as_bytes())?;
-        // Without this the rename can reach the device before the bytes do,
-        // and a machine that stops in between would leave an empty file
-        // where the document was.
-        file.sync_all()
-    })();
-    if let Err(problem) = written {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(format!("cannot write {}: {problem}", path.display()));
-    }
-    if let Err(problem) = std::fs::rename(&temporary, path) {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(format!("cannot write {}: {problem}", path.display()));
-    }
-    Ok(())
+    write_the_file(path, false, text)
+}
+
+/// Writes `text` to `path` as [`write_atomically`] writes it, and gives a
+/// file that is not there yet permission to be read and written by its owner
+/// alone.
+///
+/// The window writes its autosave files this way. An autosave holds the work
+/// of a session that has not been saved, so it is nobody's business but the
+/// owner's, and a project file's own permissions say nothing about the folder
+/// the autosave lands in. A file already at `path` keeps the permissions it
+/// has.
+pub fn write_privately(path: &Path, text: &str) -> Result<(), String> {
+    write_the_file(path, true, text)
+}
+
+/// Writes `text` to `path`, making a file that is not there yet private to
+/// its owner when `private` is set.
+fn write_the_file(path: &Path, private: bool, text: &str) -> Result<(), String> {
+    dermixen_core::files::write_atomically(path, private, text.as_bytes())
+        .map_err(|problem| format!("cannot write {}: {problem}", path.display()))
 }

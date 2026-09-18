@@ -40,15 +40,17 @@ pub const MIN_SAMPLES_PER_PX: f64 = 1.0;
 /// the grid by a frame.
 pub const DRAG_PX: f32 = 2.0;
 
-/// The slowest tempo the editor accepts, in beats per minute. No music the
-/// app is for is slower, and a grid below it is a mistake rather than a
-/// correction.
-pub const LOWEST_BPM: f64 = 20.0;
+/// The slowest tempo the editor accepts, in beats per minute, which is
+/// [`Bpm::LOWEST`]. No music the app is for is slower, and a grid below it is
+/// a mistake rather than a correction. A document holds no slower tempo
+/// either, so a grid the editor takes is one a document may hold.
+pub const LOWEST_BPM: f64 = Bpm::LOWEST.0;
 
-/// The fastest tempo the editor accepts, in beats per minute. A grid above
-/// it puts beats closer together than the metronome's click is long, and
-/// its beat lines would crowd every pixel of the strip.
-pub const HIGHEST_BPM: f64 = 999.0;
+/// The fastest tempo the editor accepts, in beats per minute, which is
+/// [`Bpm::HIGHEST`]. A grid above it puts beats closer together than the
+/// metronome's click is long, and its beat lines would crowd every pixel of
+/// the strip. A document holds no faster tempo either.
+pub const HIGHEST_BPM: f64 = Bpm::HIGHEST.0;
 
 /// The part of the track on the strip.
 ///

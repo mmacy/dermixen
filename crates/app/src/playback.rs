@@ -49,6 +49,32 @@ pub enum TransportOrder {
     Stop,
 }
 
+/// What the status line says about the last document the transport was
+/// handed, from the transport's report `now` and the report `earlier` the
+/// window had before it. Nothing means the last document was taken and the
+/// line has nothing to say about it.
+///
+/// The transport answers a document it will not take in two ways, which read
+/// differently to a person. A document the render could not continue through
+/// starts the render over at the playhead, which costs the buffering shown in
+/// the same line, and [`TransportStatus::restarts`] counts it. A document
+/// [`dermixen_core::Mix::check`] refuses is turned away whole: the transport
+/// goes on playing the document it already holds, the count stands still, and
+/// what a person hears is no longer the mix in the window. The count is what
+/// tells the two apart here.
+///
+/// The window calls this when the transport's reason has changed since the
+/// report before, since a reason that still stands is words already on the
+/// line.
+pub fn restart_note(earlier: Option<&TransportStatus>, now: &TransportStatus) -> Option<String> {
+    let reason = now.last_restart.as_ref()?;
+    let counted_before = earlier.map_or(0, |earlier| earlier.restarts);
+    if now.restarts == counted_before {
+        return Some(format!("The edit was not applied to the preview: {reason}"));
+    }
+    Some(format!("Started over: {reason}"))
+}
+
 /// The frame playing starts from: the beginning when `playhead` is at or
 /// past the mix's `length`, since there is nothing left to hear from
 /// `playhead` on, and `playhead` itself otherwise.

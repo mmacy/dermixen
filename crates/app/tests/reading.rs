@@ -30,6 +30,12 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// The hash of a fixture's bytes, which is the hash a document names for it.
+/// The reading thread keeps audio only for a file whose bytes are the track's.
+fn hash_of(name: &str) -> ContentHash {
+    dermixen_media::hash_file(&fixture(name)).unwrap()
+}
+
 /// An empty store for the audio the thread decodes.
 fn cache() -> Arc<Mutex<AudioCache>> {
     Arc::new(Mutex::new(AudioCache::default()))
@@ -126,7 +132,7 @@ fn a_track_wanted_after_the_thread_started_gets_its_overview_and_is_read_ahead()
     let cache = cache();
     let (wake, woken) = counting_wake();
     let reading = Reading::start(Vec::new(), None, Arc::clone(&cache), wake);
-    let hash = ContentHash([1; 32]);
+    let hash = hash_of("sine-440-44k.wav");
     reading.want(Wanted {
         hash,
         path: fixture("sine-440-44k.wav"),
@@ -157,8 +163,8 @@ fn a_track_wanted_after_the_thread_started_gets_its_overview_and_is_read_ahead()
 
 #[test]
 fn the_tracks_the_thread_started_with_are_read_before_a_track_wanted_later() {
-    let first = ContentHash([2; 32]);
-    let second = ContentHash([3; 32]);
+    let first = hash_of("sine-440-44k.mp3");
+    let second = hash_of("sine-220-mono-44k.wav");
     let reading = Reading::start(
         vec![Wanted {
             hash: first,
@@ -188,7 +194,7 @@ fn a_file_that_cannot_be_read_is_reported_by_path_and_the_next_wanted_track_is_s
     let reading = Reading::start(Vec::new(), None, Arc::clone(&cache), || {});
     let missing = fixture("not-there.wav");
     let bad = ContentHash([4; 32]);
-    let good = ContentHash([5; 32]);
+    let good = hash_of("sine-440-44k.wav");
     reading.want(Wanted {
         hash: bad,
         path: missing.clone(),
@@ -217,7 +223,7 @@ fn a_file_that_cannot_be_read_is_reported_by_path_and_the_next_wanted_track_is_s
 fn a_track_wanted_later_gets_its_phrases_from_the_index_before_its_overview() {
     let dir = tempfile::tempdir().unwrap();
     let index_path = dir.path().join("library.sqlite");
-    let hash = ContentHash([6; 32]);
+    let hash = hash_of("sine-440-44k.wav");
     let path = fixture("sine-440-44k.wav");
     let phrases = PhraseRecord {
         analyzer: "shifts".to_owned(),
@@ -272,4 +278,40 @@ fn the_thread_ends_when_the_reading_is_dropped() {
         );
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+#[test]
+fn a_file_whose_bytes_are_not_the_tracks_is_never_kept_for_the_render() {
+    // The file at the path is another recording than the one the document
+    // names. The render takes its audio from what the reading thread kept, so
+    // nothing may be kept under the document's hash, not even for a moment.
+    let cache = cache();
+    let reading = Reading::start(Vec::new(), None, Arc::clone(&cache), || {});
+    let named = ContentHash([9; 32]);
+    let good = hash_of("sine-220-mono-44k.wav");
+    reading.want(Wanted {
+        hash: named,
+        path: fixture("sine-440-44k.wav"),
+    });
+    reading.want(Wanted {
+        hash: good,
+        path: fixture("sine-220-mono-44k.wav"),
+    });
+
+    let found = collect_until(&reading, |finding| is_overview_of(finding, good));
+    assert_eq!(
+        found.len(),
+        2,
+        "one finding for each track: {}",
+        found.len()
+    );
+    assert!(
+        !is_overview_of(&found[0], named),
+        "a file that is not the track has no overview to draw as the track's"
+    );
+    assert!(
+        kept(&cache, named).is_none(),
+        "the other recording was kept"
+    );
+    assert!(kept(&cache, good).is_some());
 }
