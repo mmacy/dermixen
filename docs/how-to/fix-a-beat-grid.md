@@ -26,7 +26,7 @@ Starting the audition stops the mix, since the machine has one audio output, and
 
 When you know a track's tempo and where its first beat falls, pass them to `mix add`:
 
-```
+```sh
 dermixen mix add set.dmx track.mp3 --bpm 138 --first-beat 0.512
 ```
 

@@ -4,11 +4,11 @@ A mix document names each track by its path and by the hash of its bytes. When t
 
 ## Recognize a mix whose files have moved
 
-```
+```sh
 dermixen render set.dmx set.wav
 ```
 
-```
+```text
 error: cannot read /Volumes/old/07 L.S.C. - Big Brain.mp3, which set.dmx names: No such file or directory (os error 2). Run dermixen mix relink set.dmx to point the mix at the file wherever it is now.
 ```
 
@@ -16,7 +16,7 @@ error: cannot read /Volumes/old/07 L.S.C. - Big Brain.mp3, which set.dmx names: 
 
 ## Relink from the library
 
-```
+```sh
 dermixen mix relink set.dmx
 ```
 
@@ -24,13 +24,13 @@ Every track's file is hashed. A track whose file is in place is kept. Every othe
 
 ## Relink from folders
 
-```
+```sh
 dermixen mix relink set.dmx --under /Volumes/new/goa --under ~/Downloads
 ```
 
 When the library has no record of the new paths (the files were moved and no scan has run since), `--under` names folders to search, and may be repeated. Each folder is searched in the order given, hashing every audio file in it until one matches. The output says what happened to each track:
 
-```
+```text
   1. relinked /Volumes/new/goa/comp/VA - Fill Your Head with Phantasm Vol 2/07 L.S.C. - Big Brain.mp3  was /Volumes/old/07 L.S.C. - Big Brain.mp3
   2. kept     /Volumes/new/goa/comp/VA - Mind Rewind [DMRCD01]/202 Total Eclipse & Simon Posford - Sound Is Solid (Remix).mp3
 ```

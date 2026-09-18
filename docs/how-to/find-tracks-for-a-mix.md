@@ -4,7 +4,7 @@
 
 ## List the tracks that meet conditions
 
-```
+```sh
 dermixen library query --bpm 138-142 --compatible-with 8A --year 1995-1997
 ```
 
@@ -32,7 +32,7 @@ Each line of the output gives the Camelot code (`--` when the key is unknown), t
 
 ## Find harmonically compatible tracks
 
-```
+```sh
 dermixen library query --compatible-with 12A --bpm 140-144
 ```
 
@@ -40,13 +40,13 @@ Every key has one Camelot code: a number from 1 to 12 and a letter, `A` for mino
 
 ## Find the track a line of text names
 
-```
+```sh
 dermixen library find "Koxbox - Point of No Return"
 ```
 
 The command ranks the tracks that match the text, best first, and prints each score with the path. The first two of the five lines this search printed:
 
-```
+```text
 1.00  /Users/dermixenuser/audio/goa/comp/VA - Sun Trip [LRR52231CD]/01 Koxbox - Point of No Return.mp3
 0.36  /Users/dermixenuser/audio/goa/comp/VA - Lucid Flux [ANJUNACD002]/04 Nervasystem & Aether - Distorted Waves of OM (Slight Return).mp3
 ```
@@ -55,7 +55,7 @@ The match compares words without regard to case or punctuation and forgives one 
 
 ## Get the results as JSON
 
-```
+```sh
 dermixen library query --bpm 140-144 --json
 dermixen library find "Koxbox - Point of No Return" --limit 1 --json
 ```

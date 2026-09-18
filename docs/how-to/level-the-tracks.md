@@ -4,7 +4,7 @@ Masters differ in loudness by ten decibels or more across your tracks, so a mix 
 
 ## See the gain each track got
 
-```
+```sh
 dermixen mix show set.dmx
 ```
 
@@ -14,7 +14,7 @@ The gain is added to the track's volume envelope at every moment, so the fades s
 
 ## Set a gain yourself
 
-```
+```sh
 dermixen mix add set.dmx track.mp3 --gain -3
 ```
 
@@ -24,7 +24,7 @@ dermixen mix add set.dmx track.mp3 --gain -3
 
 A track whose record in [the library](../library.md) has no loudness gets a gain of `+0.0 dB`, and `mix add` warns you on standard error, naming the file. Scan the track's folder again:
 
-```
+```sh
 dermixen library scan ~/audio/goa
 ```
 

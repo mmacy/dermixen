@@ -36,7 +36,7 @@ A value the setting does not take (`metronome = "yes"`, or a buffer of zero) and
 
 ## The command
 
-```
+```text
 dermixen settings show [--json]
 dermixen settings set <NAME> <VALUE> [--json]
 dermixen settings reset <NAME> [--json]

@@ -9,7 +9,7 @@ The window shows a mix as lanes on a timeline and plays it from any point. You m
 
 ## Open the mix
 
-```
+```sh
 dermixen open set.dmx
 ```
 

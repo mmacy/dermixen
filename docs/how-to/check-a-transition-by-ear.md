@@ -4,11 +4,11 @@ A transition is a stretch of the mix, and both `render` and `play` take a span, 
 
 ## Find where the transition is
 
-```
+```sh
 dermixen mix show set.dmx
 ```
 
-```
+```text
   1  VARIOUS ARTISTS - FILL YOUR HEAD WITH PHANTASM VOL.2 - 07 L.S.C. - Big Brain.mp3   145.00 bpm    +3.7 dB  intro       32  outro      960  0:00.0 to 7:53.5
   2  202 Total Eclipse & Simon Posford - Sound Is Solid (Remix).mp3   139.85 bpm    -6.7 dB  intro       64  outro      816  6:10.5 to 12:55.8
 2 tracks, 12:55.8 long, 34214245 samples
@@ -18,7 +18,7 @@ The last two numbers on each line are where the track's file begins and ends on 
 
 ## Render the span to a file
 
-```
+```sh
 dermixen render set.dmx transition.wav --from 6:00 --for 2:00
 ```
 
@@ -26,7 +26,7 @@ dermixen render set.dmx transition.wav --from 6:00 --for 2:00
 
 ## Play the span through the speakers
 
-```
+```sh
 dermixen play set.dmx --from 6:00 --for 2:00
 ```
 
@@ -34,7 +34,7 @@ The command decodes the tracks that sound at the start of the span, about a thir
 
 ## Prove that play and render agree
 
-```
+```sh
 dermixen play set.dmx --from 6:00 --for 2:00 --capture played.wav
 dermixen render set.dmx rendered.wav --from 6:00 --for 2:00
 cmp played.wav rendered.wav

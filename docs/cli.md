@@ -24,7 +24,7 @@ The library is everything Dermixen has learned about the tracks it scanned, kept
 
 ### analyze
 
-```
+```text
 dermixen analyze <FILE> [--json] [--bpm <BPM>] [--first-beat <SECONDS>]
 ```
 
@@ -34,7 +34,7 @@ The JSON output is a `track_record` in the schema. The text output lists the sam
 
 ### decode
 
-```
+```text
 dermixen decode <FILE> <OUT> [--from <TIME>] [--for <LENGTH>] [--json]
 ```
 
@@ -46,7 +46,7 @@ On success one line on standard output names the file written, its length as `mi
 
 ### library scan
 
-```
+```text
 dermixen library scan [ROOT] [--exclude <DIR>]... [--library <PATH>] [--json]
 ```
 
@@ -54,7 +54,7 @@ Finds every audio file under `ROOT`, analyzes the ones the library does not cont
 
 ### library query
 
-```
+```text
 dermixen library query [--under <DIR>] [--bpm <RANGE>] [--year <RANGE>] [--length <RANGE>] [--key <CODE>] [--compatible-with <CODE>] [--artist <TEXT>] [--title <TEXT>] [--no-approximate-years] [--min-grid-confidence <CONFIDENCE>] [--min-anchor-confidence <CONFIDENCE>] [--library <PATH>] [--json]
 ```
 
@@ -64,7 +64,7 @@ The text output is one line per track: the Camelot code or `--` when the key is 
 
 ### library find
 
-```
+```text
 dermixen library find <TEXT> [--limit <N>] [--library <PATH>] [--json]
 ```
 
@@ -72,7 +72,7 @@ Ranks the tracks in the library that match `TEXT`, such as one line of a trackli
 
 ### mix new
 
-```
+```text
 dermixen mix new <MIX> [--json]
 ```
 
@@ -80,7 +80,7 @@ Writes an empty mix document to `MIX`, which by convention ends in `.dmx`. It re
 
 ### mix add
 
-```
+```text
 dermixen mix add <MIX> <FILE> [--position <N>] [--preset <NAME>] [--bars <N>] [--intro <BEAT>] [--outro <BEAT>] [--bpm <BPM>] [--first-beat <SECONDS>] [--no-keylock] [--gain <DB>] [--library <PATH>] [--json]
 ```
 
@@ -94,7 +94,7 @@ The resolved anchors must leave the outro after the intro. An add whose anchors 
 
 ### mix show
 
-```
+```text
 dermixen mix show <MIX> [--json]
 ```
 
@@ -102,7 +102,7 @@ Lays the mix out on the timeline and prints one line per track: its position, it
 
 ### mix plan
 
-```
+```text
 dermixen mix plan <PLAYLIST> [--max-step <BPM>] [--allow-repeats] [--library <PATH>] [--json]
 ```
 
@@ -120,7 +120,7 @@ A failure prints one `error:` line and nothing on standard output, and everythin
 
 ### mix move-anchor
 
-```
+```text
 dermixen mix move-anchor <MIX> <N> (--intro <BEAT> | --outro <BEAT>)... [--json]
 ```
 
@@ -130,7 +130,7 @@ The beat must be whole, and the pair of anchors the track ends up with must leav
 
 ### mix set-gain
 
-```
+```text
 dermixen mix set-gain <MIX> <N> <DB> [--json]
 ```
 
@@ -138,7 +138,7 @@ Sets the gain of track `N`, counting from one, to `DB` decibels, in place of the
 
 ### mix relink
 
-```
+```text
 dermixen mix relink <MIX> [--under <DIR>]... [--library <PATH>] [--json]
 ```
 
@@ -148,7 +148,7 @@ One line per track on standard output says which it was: `kept`, `relinked` with
 
 ### render
 
-```
+```text
 dermixen render <MIX> <OUT> [--from <TIME>] [--for <LENGTH>] [--handover <N>] [--json]
 ```
 
@@ -162,7 +162,7 @@ Every track's file is hashed first and checked against the document. A file that
 
 ### play
 
-```
+```text
 dermixen play <MIX> [--from <TIME>] [--for <LENGTH>] [--capture <WAV>] [--json]
 ```
 
@@ -174,7 +174,7 @@ On success one line on standard output says how much was played, from where, and
 
 ### open
 
-```
+```text
 dermixen open <MIX> [--json]
 ```
 
@@ -186,7 +186,7 @@ The line printed on success names the mix, the executable, and the process ID of
 
 ### scoreboard
 
-```
+```text
 dermixen scoreboard <DIR> [--giantsteps] [--json]
 ```
 
@@ -194,7 +194,7 @@ Runs every built-in analyzer over the ground truth in `DIR` and prints the table
 
 ### settings
 
-```
+```text
 dermixen settings show [--json]
 dermixen settings set <NAME> <VALUE> [--json]
 dermixen settings reset <NAME> [--json]
@@ -216,6 +216,6 @@ The pitch-preserving stretcher, the aubio beat tracker, the libkeyfinder key det
 
 `scripts/render-two-tracks.sh` goes from two audio files and their tempos and anchors to a rendered WAV in one command, which is the first thing to listen to:
 
-```
+```sh
 scripts/render-two-tracks.sh a.wav 138 896 b.wav 140 32 mix.wav
 ```

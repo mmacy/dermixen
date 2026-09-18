@@ -16,7 +16,7 @@ Analysis quality is measured on whole tracks, and those tracks are not in the re
 
 To run these tests, point the variable at a local music collection:
 
-```
+```sh
 DERMIXEN_LIBRARY=/Volumes/goa cargo test --workspace
 ```
 

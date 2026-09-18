@@ -9,7 +9,7 @@ Given a tracklisting, one track per line, the `dermixen` command builds the mix 
 
 ## Resolve each line
 
-```
+```sh
 dermixen library find "03. Koxbox - Point of No Return" --limit 1 --json
 ```
 
@@ -17,7 +17,7 @@ The top match's `score` measures how well the line matches the track. A score of
 
 ## Build the mix in order
 
-```
+```sh
 dermixen mix new set.dmx
 dermixen mix add set.dmx "/Users/dermixenuser/audio/goa/comp/VA - Analog Dreams [DATCD005]/2 Space Tribe - The Great Spirit (Original Mix) - mastered.mp3"
 dermixen mix add set.dmx "/Users/dermixenuser/audio/goa/comp/VA - Sun Trip [LRR52231CD]/01 Koxbox - Point of No Return.mp3"
@@ -53,7 +53,7 @@ for path in paths:
     subprocess.run(["dermixen", "mix", "add", mix, path], check=True)
 ```
 
-```
+```sh
 python3 build_mix.py tracklist.txt set.dmx
 ```
 
@@ -61,7 +61,7 @@ The lines that don't resolve are the ones to fix by hand: a track the scan hasn'
 
 ## Check the result
 
-```
+```sh
 dermixen mix show set.dmx
 dermixen render set.dmx set.mp3
 ```

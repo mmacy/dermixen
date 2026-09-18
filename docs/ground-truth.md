@@ -35,7 +35,7 @@ Anchor ground truth is a separate annotation file, `name.anchors`, beside the au
 
 An annotation file contains one `key value` line per fact, with `#` lines as comments:
 
-```
+```text
 # The grid fitted to the section markers and the measure marker as the outro anchor.
 file goa/comp/VA - Analog Dreams [DATCD005]/2 Space Tribe - The Great Spirit (Original Mix) - mastered.mp3
 bpm 136.6689
@@ -138,7 +138,7 @@ Snapping anchors to phrases, which the `anchors` example measures as the rows `k
 
 ## Running it
 
-```
+```sh
 dermixen scoreboard path/to/ground-truth
 dermixen scoreboard --giantsteps path/to/giantsteps-tempo-dataset
 dermixen scoreboard tests/ground-truth/anchors

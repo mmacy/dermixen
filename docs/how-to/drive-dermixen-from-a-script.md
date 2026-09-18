@@ -4,7 +4,7 @@ Every command is written for a program as much as for a person: JSON output behi
 
 ## Ask for JSON
 
-```
+```sh
 dermixen library query --bpm 140-144 --json
 dermixen mix add set.dmx track.mp3 --json
 dermixen render set.dmx set.wav --json
@@ -28,7 +28,7 @@ Progress lines, warnings, and the scan's per-file lines go to standard error. St
 
 ## Point every command at one library file
 
-```
+```sh
 export DERMIXEN_LIBRARY_FILE=/path/to/library.sqlite
 ```
 
@@ -40,7 +40,7 @@ A mix document is versioned JSON with every field described in [The project file
 
 ## Hand the mix to a person
 
-```
+```sh
 dermixen open set.dmx --json
 ```
 
