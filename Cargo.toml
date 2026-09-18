@@ -50,3 +50,8 @@ unsafe_code = "forbid"
 
 [profile.test]
 opt-level = 1
+
+# No profile here sets `panic = "abort"`, and none may. `dermixen_media::decode`
+# catches a panic from the decoding library and reports the file as damaged,
+# which is what keeps one hostile file from ending a library scan or a render.
+# Aborting on a panic would end the process instead.

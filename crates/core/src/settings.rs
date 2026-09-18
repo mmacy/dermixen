@@ -18,6 +18,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::files::ReadError;
+
 /// The environment variable that names the settings file.
 pub const SETTINGS_VARIABLE: &str = "DERMIXEN_SETTINGS_FILE";
 
@@ -238,23 +240,40 @@ impl Settings {
     /// Reads the settings file at `path`. A file that is not there is every
     /// default. A file that is there and cannot be read, or whose text does
     /// not read as settings, is an error.
+    ///
+    /// The file is read as [`crate::files::read_text`] reads one, so it must
+    /// be a regular file of at most [`crate::files::LARGEST_SETTINGS`] bytes.
+    /// A path that names a device or a named pipe is an error at once rather
+    /// than a read that never ends.
     pub fn read(path: &Path) -> Result<Settings, SettingsError> {
-        match std::fs::read_to_string(path) {
+        match crate::files::read_text(path, crate::files::LARGEST_SETTINGS) {
             Ok(text) => Settings::from_toml(&text),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Settings::default()),
-            Err(error) => Err(SettingsError::Read(error.to_string())),
+            Err(ReadError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
+                Ok(Settings::default())
+            }
+            Err(ReadError::Io { source, .. }) => Err(SettingsError::Read(source.to_string())),
+            Err(ReadError::NotARegularFile { .. }) => {
+                Err(SettingsError::Read("it is not a regular file".to_owned()))
+            }
+            Err(ReadError::TooLarge { limit, .. }) => Err(SettingsError::Read(format!(
+                "it is larger than the {limit} bytes a settings file may be"
+            ))),
         }
     }
 
     /// Writes these settings to the file at `path`, making the folder it
     /// goes in when the folder is not there, and replacing the file when it
     /// is.
+    ///
+    /// The write goes through [`crate::files::write_atomically`], so a run
+    /// that stops part way leaves the settings file as it was, and a file
+    /// already at `path` keeps its permissions.
     pub fn write(&self, path: &Path) -> Result<(), SettingsError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|error| SettingsError::Write(error.to_string()))?;
         }
-        std::fs::write(path, self.to_toml())
+        crate::files::write_atomically(path, false, self.to_toml().as_bytes())
             .map_err(|error| SettingsError::Write(error.to_string()))
     }
 }

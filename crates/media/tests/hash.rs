@@ -40,3 +40,40 @@ fn a_large_file_is_hashed_whole() {
         *blake3::hash(&bytes).as_bytes()
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn a_device_a_pipe_and_a_folder_are_refused_at_once() {
+    let folder = tempfile::tempdir().unwrap();
+    let pipe = folder.path().join("pipe.wav");
+    let made = std::process::Command::new("mkfifo")
+        .arg(&pipe)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    let link = folder.path().join("zero.wav");
+    std::os::unix::fs::symlink("/dev/zero", &link).unwrap();
+
+    for path in [
+        std::path::PathBuf::from("/dev/zero"),
+        link,
+        pipe,
+        folder.path().to_path_buf(),
+    ] {
+        let shown = path.display().to_string();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let hashed = dermixen_media::hash_file(&path).map(|_| ());
+            let decoded = dermixen_media::decode(&path).map(|_| ());
+            sender.send((hashed, decoded))
+        });
+        let (hashed, decoded) = receiver
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap_or_else(|_| panic!("{shown}: no answer within two seconds"));
+        assert!(hashed.is_err(), "{shown} was hashed");
+        assert!(
+            matches!(decoded, Err(dermixen_media::DecodeError::Read { .. })),
+            "{shown}: {decoded:?}"
+        );
+    }
+}

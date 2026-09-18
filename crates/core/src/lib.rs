@@ -10,6 +10,7 @@ pub mod anchors;
 pub mod beat_grid;
 pub mod edit;
 pub mod envelope;
+pub mod files;
 pub mod hash;
 pub mod leveling;
 pub mod mix;
