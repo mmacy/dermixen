@@ -36,16 +36,15 @@ pub struct Loudness {
 /// Measures the integrated loudness and the true peak of a track.
 ///
 /// The audio is stereo at the internal sample rate, as every decoded track
-/// is. `None` means this function reports no loudness for the audio, which
-/// covers four cases: audio shorter than the four hundred milliseconds one
-/// measurement block spans, audio that never rises above the absolute gate
-/// of minus seventy LUFS, which is silence for this purpose, audio that
-/// measures above 0 LUFS, which no real master does, and audio whose true
-/// peak is not a finite number, which is what the meter's true peak filter
-/// reports when a sample overflows it. A track with a loudness always has a
-/// finite true peak, so the leveling rule in [`dermixen_core::leveling`]
-/// always has two numbers it can work a gain from, and a track with no
-/// loudness joins a mix at unity gain.
+/// is. Four kinds of audio come back as `None`: audio shorter than the four
+/// hundred milliseconds one measurement block spans, audio that never rises
+/// above the absolute gate of minus seventy LUFS, which is silence for this
+/// purpose, audio that measures above 0 LUFS, which no real master does, and
+/// audio whose true peak is not a finite number, which is what the meter's
+/// true peak filter reports when a sample overflows it. A track with a
+/// loudness always has a finite true peak, so the leveling rule in
+/// [`dermixen_core::leveling`] always has two numbers it can work a gain
+/// from, and a track with no loudness joins a mix at unity gain.
 pub fn measure_loudness(audio: &Audio) -> Option<Loudness> {
     let mut meter = EbuR128::new(CHANNELS, SAMPLE_RATE, Mode::I | Mode::TRUE_PEAK)
         .expect("stereo audio at the fixed sample rate is always a valid EBU R 128 configuration");

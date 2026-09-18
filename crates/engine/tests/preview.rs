@@ -1077,3 +1077,67 @@ fn a_device_is_handed_only_samples_it_can_play() {
         assert_eq!(device_sample(given), handed, "{given}");
     }
 }
+
+/// A stretcher that plays the audio through unchanged until it has produced
+/// `until` frames and then panics, which stands in for a defect in the
+/// render.
+struct PanicsAfter {
+    inner: Resampler,
+    produced: usize,
+    until: usize,
+}
+
+/// What the stretcher above panics with, which is the text the preview goes
+/// on to report.
+const THE_DEFECT: &str = "a defect in the stretcher";
+
+impl TimeStretcher for PanicsAfter {
+    fn process(&mut self, input: &[Frame], output: &mut [Frame]) {
+        self.produced += output.len();
+        assert!(self.produced <= self.until, "{THE_DEFECT}");
+        self.inner.process(input, output);
+    }
+
+    fn input_latency(&self) -> Samples {
+        self.inner.input_latency()
+    }
+
+    fn output_latency(&self) -> Samples {
+        self.inner.output_latency()
+    }
+
+    fn reset(&mut self) {
+        self.inner.reset();
+    }
+}
+
+#[test]
+fn a_render_that_panics_ends_the_preview_and_says_what_the_panic_said() {
+    // The panic this test causes is deliberate, so the panic message that
+    // appears on standard error while it runs is what the test is asking
+    // for rather than a sign of a failure.
+    let (mix, sources) = two_kicks(false);
+    let mut capture = Capture::new(None);
+    let played = play(
+        &mix,
+        Samples::ZERO..Samples(i64::MAX),
+        &mut |index, _| Ok(Box::new(sources[index].clone()) as Box<dyn Source>),
+        &mut |_| {
+            Box::new(PanicsAfter {
+                inner: Resampler::new(),
+                produced: 0,
+                until: 44_100,
+            }) as Box<dyn TimeStretcher>
+        },
+        &mut capture,
+        LOOKAHEAD,
+        &mut |_| {},
+    );
+    match played {
+        Err(RenderError::Defect(message)) => {
+            assert!(message.contains(THE_DEFECT), "{message}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(capture.stopped, "the output is stopped after a defect");
+}

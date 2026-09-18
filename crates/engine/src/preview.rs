@@ -23,12 +23,15 @@ use std::collections::VecDeque;
 #[cfg(feature = "playback")]
 use std::num::NonZeroU32;
 use std::ops::Range;
+use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use dermixen_core::{Mix, Samples, Track};
 use dermixen_media::Frame;
 
-use crate::render::{BLOCK_FRAMES, Loader, Progress, RenderError, clip, mix_length, render_range};
+use crate::render::{
+    BLOCK_FRAMES, Loader, Progress, RenderError, clip, mix_length, panic_message, render_range,
+};
 use crate::stretch::TimeStretcher;
 
 /// The frames a feed holds and what has become of the ones already pulled.
@@ -190,12 +193,24 @@ impl Channel {
     ///
     /// A mutex in Rust is poisoned once a thread panics while holding its
     /// guard, and every later lock on that mutex reports the poisoning. A
-    /// [`Queue`] holds counts and a queue of frames, and every change made
-    /// under the lock is a few assignments, so a queue a panic left behind is
-    /// still one the next caller can read and write. A device's audio
-    /// callback pulls through this lock on the thread the callback runs on,
-    /// which has a few milliseconds to hand audio back and no way to catch a
-    /// panic, so this takes the queue back instead of panicking.
+    /// device's audio callback pulls through this lock on the thread the
+    /// callback runs on, which has a few milliseconds to hand audio back and
+    /// no way to catch a panic, so taking the queue back is the only answer
+    /// that leaves the device playing.
+    ///
+    /// What the recovery promises is that the callback never panics on a
+    /// poisoned lock, and no more than that. The one place that runs
+    /// arbitrary work under the lock is [`remake`](Channel::remake), whose
+    /// closure makes an [`Audition`](crate::Audition)'s frames again under a
+    /// new setting, so a panic there can leave a queue holding one block of
+    /// frames that is part the old setting and part the new one, which a
+    /// person hears as the metronome changing partway through a block. A
+    /// thread that panicked while filling a feed leaves that feed open, so
+    /// the device plays what is already queued and then silence, until
+    /// whoever owns the feed ends it. Rust prints the panic itself, with the
+    /// line it happened on, to standard error as it happens, so the defect
+    /// behind any of this is reported whether or not the recovery hides its
+    /// effect.
     fn locked(&self) -> MutexGuard<'_, Queue> {
         self.queue
             .lock()
@@ -817,11 +832,15 @@ pub struct PlayReport {
 /// [`Feed::fail`], and the preview ends with the same error holding the
 /// device's message. A mix that [`dermixen_core::Mix::check`] refuses ends
 /// the preview with [`RenderError::Document`] before the output is started
-/// at all. Any other error is as for `render_range`. When the preview ends early
-/// because of an error, the render marks the feed ended before anything
-/// else, so an output that is waiting for frames stops waiting instead of
-/// stalling. Whenever the output was started, it has been stopped by the
-/// time this returns, on success and on error alike.
+/// at all. A panic in the render, which is a defect in dermixen, ends the
+/// preview with [`RenderError::Defect`] holding what the panic said, after
+/// the feed has been failed and the output stopped, so a device never goes
+/// on pulling a feed nothing will fill again. Any other error is as for
+/// `render_range`. When the preview ends early because of an error, the
+/// render marks the feed ended before anything else, so an output that is
+/// waiting for frames stops waiting instead of stalling. Whenever the output
+/// was started, it has been stopped by the time this returns, on success and
+/// on error alike.
 pub fn play(
     mix: &Mix,
     span: Range<Samples>,
@@ -858,37 +877,63 @@ pub fn play(
     // output failure it really is.
     let mut refusal: Option<String> = None;
 
-    let rendered = render_range(
-        mix,
-        Samples(span.start)..Samples(span.end),
-        load,
-        stretchers,
-        &mut |block| {
-            let mut rest = block;
-            while !rest.is_empty() {
-                if running {
-                    rest = &rest[channel.put(rest)?..];
-                } else {
-                    // Nothing takes frames out until the output is running, so
-                    // the feed is filled to the lookahead first and the output
-                    // is started the moment it is full.
-                    rest = &rest[channel.fill(rest)..];
-                    if channel.waiting() >= capacity {
-                        output
-                            .start(Feed::new(Arc::clone(&channel)))
-                            .inspect_err(|message| refusal = Some(message.clone()))?;
-                        running = true;
+    // The render fills the feed on this thread, so a panic in it would
+    // otherwise leave the device pulling a feed that never ends and hearing
+    // silence with nothing said. Catching the panic here turns a defect into
+    // an error this call returns, after the feed has been failed and the
+    // output stopped, which is what every other way of stopping does. Rust
+    // prints the panic and the line it happened on to standard error before
+    // the unwinding reaches this point.
+    let rendered = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        render_range(
+            mix,
+            Samples(span.start)..Samples(span.end),
+            load,
+            stretchers,
+            &mut |block| {
+                let mut rest = block;
+                while !rest.is_empty() {
+                    if running {
+                        rest = &rest[channel.put(rest)?..];
+                    } else {
+                        // Nothing takes frames out until the output is running,
+                        // so the feed is filled to the lookahead first and the
+                        // output is started the moment it is full.
+                        rest = &rest[channel.fill(rest)..];
+                        if channel.waiting() >= capacity {
+                            output
+                                .start(Feed::new(Arc::clone(&channel)))
+                                .inspect_err(|message| refusal = Some(message.clone()))?;
+                            running = true;
+                        }
                     }
                 }
+                progress(Progress {
+                    written: Samples(from + channel.pulled()),
+                    total: Samples(total),
+                });
+                Ok(())
+            },
+            &mut |_| {},
+        )
+    }));
+
+    let rendered = match rendered {
+        Ok(rendered) => rendered,
+        Err(payload) => {
+            let stopped = RenderError::Defect(panic_message(payload.as_ref()));
+            // The frames rendered ahead are thrown away and the feed is
+            // ended, so an output that pulls until its feed is finished
+            // stops pulling and the stop below joins its thread. The feed is
+            // told the same words this call returns.
+            channel.fail(&stopped.to_string());
+            channel.end();
+            if running {
+                output.stop();
             }
-            progress(Progress {
-                written: Samples(from + channel.pulled()),
-                total: Samples(total),
-            });
-            Ok(())
-        },
-        &mut |_| {},
-    );
+            return Err(stopped);
+        }
+    };
 
     // The render has finished putting frames in, however it ended, so the feed
     // ends here: an output waiting for frames sees the end instead of waiting
@@ -1084,10 +1129,12 @@ impl Output for CpalOutput {
                         for (frame, out) in
                             ready[..got].iter().zip(written.chunks_exact_mut(channels))
                         {
-                            // Nothing reaches the device that has not been
-                            // through this, so a sample the render made that
-                            // no device can play is silence rather than
-                            // whatever the device makes of it.
+                            // Every frame pulled from the feed goes through
+                            // this, so a sample the render made that no device
+                            // can play reaches the device as silence rather
+                            // than as whatever the device makes of it. What is
+                            // left of the buffer below is silence, which needs
+                            // no screening.
                             out[0] = device_sample(frame[0]);
                             out[1] = device_sample(frame[1]);
                         }

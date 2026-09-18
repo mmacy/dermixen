@@ -6,7 +6,8 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use dermixen_core::{
-    Decibels, Mix, PlacedTrack, SAMPLE_RATE, Samples, Seconds, TempoCurve, Timeline, Track,
+    Beats, Decibels, MAX_BEAT, Mix, PlacedTrack, SAMPLE_RATE, Samples, Seconds, TempoCurve,
+    Timeline, Track,
 };
 use dermixen_media::{Audio, Frame};
 
@@ -88,6 +89,31 @@ pub enum RenderError {
     /// stopped taking frames before the span had been played.
     #[error("the audio output failed: {0}")]
     Output(String),
+    /// A defect in dermixen stopped a preview: the code filling the feed
+    /// panicked, and the text is what the panic said. Rust prints the panic
+    /// and the line it happened on to standard error as it happens, so this
+    /// tells a person that the preview stopped and where to look rather than
+    /// repeating the whole panic. Only [`play`](crate::play) and a
+    /// [`Transport`](crate::Transport) report this, because a preview that
+    /// stopped without saying so leaves a device playing silence. An offline
+    /// render lets a panic reach its caller.
+    #[error("the preview stopped on a defect in dermixen: {0}")]
+    Defect(String),
+}
+
+/// What a panic said, taken from the value
+/// [`std::panic::catch_unwind`](std::panic::catch_unwind) hands back.
+///
+/// A panic raised by `panic!`, by `assert!`, or by `unwrap` on a failure
+/// carries its message as a string, which is what a person needs to read.
+/// A panic raised with a value of any other type has no message to take, so
+/// the words below stand in its place.
+pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|message| (*message).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "the code rendering the mix panicked".to_owned())
 }
 
 /// Decoded audio a render reads from.
@@ -774,14 +800,16 @@ fn render_blocks(
         // are thrown away rather than heard, and no boundary follows the last
         // block of the run, so neither is offered as a place to take one.
         let asking_again = (at >= span.start && end < until).then_some(end);
-        if let Some(handover) = carry(asking_again) {
-            // A document that Mix::check refuses has no safe layout, and a
-            // document with no tracks has no timeline and nothing left to
-            // render. The run ends here for both rather than going on with a
+        // A document that Mix::check refuses has no safe layout, so the run
+        // leaves it and goes on with the document it already holds.
+        // Transport::replace turns such a document away for the same reason
+        // and keeps the document the transport is playing, and a transport is
+        // the only caller that hands a document over, so the two agree.
+        let handover = carry(asking_again).filter(|handover| handover.mix.check().is_ok());
+        if let Some(handover) = handover {
+            // A document with no tracks has no timeline and nothing left to
+            // render, so the run ends here rather than going on with a
             // document it cannot lay out.
-            if handover.mix.check().is_err() {
-                break;
-            }
             let Some(laid_out) = handover.mix.timeline() else {
                 break;
             };
@@ -939,19 +967,57 @@ pub(crate) fn clip(span: &Range<Samples>, length: i64) -> Range<i64> {
 /// the length a span is clipped to, so a command that refuses a start past
 /// the end of the mix measures the end here.
 ///
-/// A mix [`dermixen_core::Mix::check`] refuses has none either, because such
-/// a mix has no length the render would ever deliver: every entry point of
-/// the engine refuses it. Answering zero rather than laying such a mix out
-/// is what keeps this function from reaching the panic
-/// [`dermixen_core::Mix::timeline`] documents, which only a mix built in
-/// memory and never checked can reach.
+/// A mix whose values would make [`dermixen_core::Mix::timeline`] reach the
+/// panic its documentation states has none either: this function tests every
+/// tempo, every anchor, and every tempo node's beat first, and answers zero
+/// rather than laying such a mix out. That test is narrower than
+/// [`dermixen_core::Mix::check`], so a mix refused for a value the layout
+/// survives, such as a gain out of range, still has its real length here,
+/// and every entry point of the engine that renders runs the whole of
+/// `Mix::check` and refuses it. A window calls this on every repaint, so the
+/// mix is laid out once here and not again.
 pub fn mix_length(mix: &Mix) -> Samples {
-    if mix.check().is_err() {
+    if !lays_out(mix) {
         return Samples::ZERO;
     }
     Samples(mix.timeline().map_or(0, |timeline| {
         (timeline.end() - timeline.start()).to_samples().0.max(0)
     }))
+}
+
+/// Whether [`dermixen_core::Mix::timeline`] lays this mix out without the
+/// panic its documentation states under "Panics".
+///
+/// Three kinds of value make that layout panic: a tempo the tempo curve
+/// refuses, which is a tempo outside the range from
+/// [`Bpm::LOWEST`](dermixen_core::Bpm::LOWEST) to
+/// [`Bpm::HIGHEST`](dermixen_core::Bpm::HIGHEST), a beat that is not a
+/// finite number, and a running sum of anchors that reaches a number that is
+/// not finite. Testing that every tempo is one
+/// [`Bpm::is_valid`](dermixen_core::Bpm::is_valid) accepts, and that every
+/// anchor and every tempo node's beat is within [`MAX_BEAT`] of zero, rules
+/// out all three: each track moves the running sum by at most twice
+/// [`MAX_BEAT`], so a mix would need more tracks than a machine can hold
+/// before the sum stopped being finite.
+///
+/// This is narrower than [`dermixen_core::Mix::check`], which also bounds a
+/// track's length, a gain, an envelope level, and the length of the whole
+/// mix. A mix that fails only one of those lays out without a panic, so
+/// [`mix_length`] answers its real length. Every entry point of the engine
+/// that renders runs the whole of `Mix::check` and refuses such a mix.
+fn lays_out(mix: &Mix) -> bool {
+    // A comparison against NaN is false, so each test below rules out a beat
+    // that is not a number as well as one that is out of range.
+    let beat_in_range = |beat: Beats| beat.0.abs() <= MAX_BEAT.0;
+    mix.tracks.iter().all(|track| {
+        track.grid.bpm.is_valid()
+            && beat_in_range(track.anchors.intro)
+            && beat_in_range(track.anchors.outro)
+            && track
+                .tempo
+                .iter()
+                .all(|node| beat_in_range(node.at) && node.bpm.is_valid())
+    })
 }
 
 /// Renders a mix to audio held in memory.
@@ -1217,5 +1283,62 @@ mod tests {
             Some(&None),
             "the last thing the run did was take that frame away"
         );
+    }
+
+    #[test]
+    fn a_mix_that_would_not_lay_out_has_no_length() {
+        let (mix, _) = one_track();
+        let whole = mix_length(&mix);
+        assert!(whole.0 > 0, "the mix this test damages has a length");
+
+        // Every value Mix::timeline names under "Panics", each on its own.
+        type Damage = fn(&mut Mix);
+        let damages: Vec<(&str, Damage)> = vec![
+            ("grid.bpm", |mix| mix.tracks[0].grid.bpm = Bpm(f64::NAN)),
+            ("grid.bpm", |mix| mix.tracks[0].grid.bpm = Bpm(0.0)),
+            ("grid.bpm", |mix| mix.tracks[0].grid.bpm = Bpm(1e-300)),
+            ("anchors.intro", |mix| {
+                mix.tracks[0].anchors.intro = Beats(f64::INFINITY);
+            }),
+            ("anchors.outro", |mix| {
+                mix.tracks[0].anchors.outro = Beats(1e18);
+            }),
+            ("tempo[0].beat", |mix| {
+                mix.tracks[0].tempo.push(TempoNode {
+                    at: Beats(f64::NAN),
+                    bpm: Bpm(130.0),
+                });
+            }),
+            ("tempo[0].bpm", |mix| {
+                mix.tracks[0].tempo.push(TempoNode {
+                    at: Beats(8.0),
+                    bpm: Bpm(f64::INFINITY),
+                });
+            }),
+        ];
+        for (field, damage) in damages {
+            let mut damaged = mix.clone();
+            damage(&mut damaged);
+            assert!(
+                damaged.check().is_err(),
+                "{field}: the document limits accept this value"
+            );
+            assert_eq!(mix_length(&damaged), Samples::ZERO, "{field}");
+        }
+    }
+
+    #[test]
+    fn a_mix_refused_only_for_a_value_the_layout_survives_still_has_a_length() {
+        // A gain far outside the range a document may hold is refused by
+        // Mix::check and changes nothing about where the tracks sit, so the
+        // mix lays out and has the length it had.
+        let (mix, _) = one_track();
+        let mut loud = mix.clone();
+        loud.tracks[0].gain = dermixen_core::Decibels(1e9);
+        assert!(
+            loud.check().is_err(),
+            "the document limits accept this gain"
+        );
+        assert_eq!(mix_length(&loud), mix_length(&mix));
     }
 }
