@@ -414,9 +414,9 @@ fn keep_nodes(envelope: &mut Envelope, keep: impl Fn(Beats) -> bool) {
 /// the exact beat of a node that did not move replaces it.
 ///
 /// A node that lands on a beat that is not a finite number is refused as an
-/// invalid node, which the beats of a mix [`Mix::check`] accepts cannot
-/// produce: a beat of at most [`MAX_BEAT`](crate::MAX_BEAT) moved by the
-/// distance between two such beats stays far inside the range of an `f64`.
+/// invalid node. A mix [`Mix::check`] accepts never produces such a node: a
+/// beat of at most [`MAX_BEAT`](crate::MAX_BEAT), moved by the distance
+/// between two beats of that size, stays far inside the range of an `f64`.
 fn move_nodes(
     envelope: &mut Envelope,
     moves: impl Fn(Beats) -> bool,

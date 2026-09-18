@@ -2,11 +2,12 @@
 //! the beat-matched crossfade, and the presets built on those.
 //!
 //! A preset places its nodes from a track's anchors, its grid, and its
-//! length, and every function here takes those numbers to be ones a mix
-//! document may hold, which [`Mix::check`](crate::Mix::check) is what
-//! decides. Each node then lands on a finite beat at a finite level, which
-//! is why placing one cannot fail. [`apply_edit`](crate::apply_edit) checks
-//! a track before it writes a preset onto it.
+//! length. Every function here needs those three numbers to be within the
+//! limits a mix document states, and [`Mix::check`](crate::Mix::check) is
+//! what holds a track to those limits. For a track that passes that check,
+//! every node a preset places lands on a finite beat at a finite level, so
+//! no placement fails. [`apply_edit`](crate::apply_edit) checks a track
+//! before it writes a preset onto it.
 
 use crate::anchors::Anchors;
 use crate::envelope::EnvelopeNode;

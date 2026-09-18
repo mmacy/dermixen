@@ -6,6 +6,7 @@
 //! field for field.
 
 use std::collections::HashSet;
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
@@ -400,7 +401,11 @@ impl<'de> Visitor<'de> for UniqueKeys<'_> {
         let outer = self.path.len();
         let mut index = 0;
         loop {
-            self.path.push_str(&format!("[{index}]"));
+            // The index goes into the path the walk already holds, because a
+            // document has one of these for every element of every list.
+            // Writing into a `String` cannot fail, so the result says
+            // nothing.
+            let _ = write!(self.path, "[{index}]");
             let element = seq.next_element_seed(UniqueKeys {
                 path: &mut *self.path,
                 repeated: &mut *self.repeated,
