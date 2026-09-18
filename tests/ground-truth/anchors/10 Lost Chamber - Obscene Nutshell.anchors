@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/comp/VA - Goa-Head Vol 2 2CD [DA56007-2]/CD2/10 Lost Chamber - Obscene Nutshell.mp3
+bpm 143.8667
+first_beat 0.214885
+intro 13.556100 mixmeister
+outro 353.871329 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 13.556100 mixmeister
+phrase 353.871329 mixmeister

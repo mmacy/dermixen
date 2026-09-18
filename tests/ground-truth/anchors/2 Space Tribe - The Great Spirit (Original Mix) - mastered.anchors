@@ -1,0 +1,11 @@
+# The grid fitted to the section markers and the measure marker as the outro anchor. The intro anchor is the downbeat where the kick enters, confirmed by ear.
+file goa/comp/VA - Analog Dreams [DATCD005]/2 Space Tribe - The Great Spirit (Original Mix) - mastered.mp3
+bpm 136.6689
+first_beat 0.863555
+intro 55.304127 ear
+outro 413.549048 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 55.304127 ear
+phrase 413.549048 mixmeister
+# The kick is established at the intro anchor, confirmed by ear, so that bar is a section change.
+section 55.304127 ear

@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/artist/Pleiadians - Family of Light [BFLCD34]/03 Pleiadians - Modulation.mp3
+bpm 142.9815
+first_beat 0.514035
+intro 54.228757 mixmeister
+outro 915.314711 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 54.228757 mixmeister
+phrase 915.314711 mixmeister

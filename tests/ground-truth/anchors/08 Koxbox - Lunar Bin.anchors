@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/artist/Koxbox - The Great Unknown [GTN1001.20]/08 Koxbox - Lunar Bin.mp3
+bpm 146.0014
+first_beat 1.324668
+intro 14.474020 mixmeister
+outro 607.893927 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 14.474020 mixmeister
+phrase 607.893927 mixmeister

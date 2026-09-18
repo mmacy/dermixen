@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/artist/Etnica - Live In Athens 1996 2CD [DATCD04]/CD1-MP3/107 Crop Circles - Lunar Civilization (Etnica Remix).mp3
+bpm 145.0145
+first_beat 0.051219
+intro 13.289207 mixmeister
+outro 551.167632 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 13.289207 mixmeister
+phrase 551.167632 mixmeister

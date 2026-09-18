@@ -1,0 +1,8 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/artist/Pleiadians - IFO Vinyl Tracks/06 Pleiadians - Jungle Track.mp3
+bpm 142.7874
+first_beat 0.972902
+intro 0.970635 mixmeister
+outro 444.708861 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 444.708861 mixmeister

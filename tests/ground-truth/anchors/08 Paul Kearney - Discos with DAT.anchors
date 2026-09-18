@@ -1,0 +1,8 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/comp/VA - The Third Encounter 2CD [GreenAnt]/CD1/08 Paul Kearney - Discos with DAT.mp3
+bpm 148.0180
+first_beat 0.349519
+intro 0.354512 mixmeister
+outro 506.232260 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 506.232260 mixmeister

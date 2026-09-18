@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/comp/VA - Atom Smasher [OPTCD001]/06 Shli - I Am The Master.mp3
+bpm 144.4175
+first_beat 1.464122
+intro -0.201024 mixmeister
+outro 302.256986 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase -0.201024 mixmeister
+phrase 302.256986 mixmeister

@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/artist/Battle of the Future Buddhas - Digging Mud/Battle of the Future Buddhas - Digging Mud - 14 You're a Moonlander Mate.mp3
+bpm 147.8517
+first_beat 0.148118
+intro 26.116644 mixmeister
+outro 428.680417 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 26.116644 mixmeister
+phrase 428.680417 mixmeister

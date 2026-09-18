@@ -1,0 +1,1876 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mmacy/dermixen/docs/json/dermixen.schema.json",
+  "title": "The JSON objects the dermixen command prints",
+  "description": "Every command prints exactly one of these objects on standard output when given --json. The definition named after a command is the shape of that command's output; the others are shared parts.",
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "The BLAKE3 hash of a file's bytes as sixty-four lowercase hexadecimal digits."
+    },
+    "camelot": {
+      "type": "string",
+      "pattern": "^([1-9]|1[0-2])[AB]$",
+      "description": "A Camelot code such as 8A."
+    },
+    "grid": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "first_beat_sample",
+        "bpm"
+      ],
+      "properties": {
+        "first_beat_sample": {
+          "type": "integer"
+        },
+        "bpm": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "anchors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "intro_beat",
+        "outro_beat"
+      ],
+      "properties": {
+        "intro_beat": {
+          "type": "number"
+        },
+        "outro_beat": {
+          "type": "number"
+        }
+      }
+    },
+    "extent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "begins_sample",
+        "ends_sample"
+      ],
+      "properties": {
+        "begins_sample": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ends_sample": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "key": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "camelot",
+        "confidence",
+        "analyzer"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "The tonic and mode, such as A minor or F# major."
+        },
+        "camelot": {
+          "$ref": "#/$defs/camelot"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "analyzer": {
+          "type": "string"
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artist",
+        "title",
+        "year",
+        "year_is_approximate",
+        "source"
+      ],
+      "properties": {
+        "artist": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "year": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "year_is_approximate": {
+          "type": "boolean",
+          "description": "True when the year is an estimate taken from a release's other tracks or from other work by the same artists, rather than a year some source states."
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "tags",
+            "filename"
+          ]
+        }
+      }
+    },
+    "release": {
+      "type": "object",
+      "description": "What Discogs says about the release a track came from. A scan never fills these, because tags name the pressing a file was ripped from rather than the release the music first appeared on.",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "catalog_number",
+        "title",
+        "track_number",
+        "data_source"
+      ],
+      "properties": {
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "catalog_number": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "track_number": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "data_source": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "discogs_export",
+                "discogs_api"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Which lookup answered, or null when no match has been recorded."
+        }
+      }
+    },
+    "loudness": {
+      "type": "object",
+      "description": "The EBU R 128 measurement volume leveling uses, as docs/library.md describes under `loudness`.",
+      "additionalProperties": false,
+      "required": [
+        "integrated_lufs",
+        "true_peak_db"
+      ],
+      "properties": {
+        "integrated_lufs": {
+          "type": "number",
+          "description": "The integrated loudness of the whole track, in loudness units relative to full scale."
+        },
+        "true_peak_db": {
+          "type": "number",
+          "description": "The highest true peak in either channel, in decibels relative to full scale."
+        }
+      }
+    },
+    "track_record": {
+      "type": "object",
+      "description": "Everything the library knows about one track, as docs/library.md describes.",
+      "additionalProperties": false,
+      "required": [
+        "hash",
+        "path",
+        "length_samples",
+        "grid",
+        "grid_confidence",
+        "grid_analyzer",
+        "key",
+        "extent",
+        "anchors",
+        "anchor_confidence",
+        "anchor_analyzer",
+        "metadata",
+        "phrases",
+        "loudness",
+        "release"
+      ],
+      "properties": {
+        "hash": {
+          "$ref": "#/$defs/hash"
+        },
+        "path": {
+          "type": "string"
+        },
+        "length_samples": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "grid": {
+          "$ref": "#/$defs/grid"
+        },
+        "grid_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "grid_analyzer": {
+          "type": "string"
+        },
+        "key": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/key"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "extent": {
+          "$ref": "#/$defs/extent"
+        },
+        "anchors": {
+          "$ref": "#/$defs/anchors"
+        },
+        "anchor_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "anchor_analyzer": {
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/$defs/metadata"
+        },
+        "phrases": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/phrase_record"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null when the record was written before phrases were stored or the analyzer failed on the track."
+        },
+        "loudness": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/loudness"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null when the record has no loudness measurement or the track has no measurable loudness."
+        },
+        "release": {
+          "$ref": "#/$defs/release"
+        }
+      }
+    },
+    "decode": {
+      "type": "object",
+      "description": "The output of `dermixen decode --json`: the file decoded and the WAV written.",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "path",
+        "from_seconds",
+        "length_samples",
+        "length_seconds"
+      ],
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "The audio file decoded, as its canonical path."
+        },
+        "path": {
+          "type": "string",
+          "description": "The WAV file written."
+        },
+        "from_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Where in the file the WAV begins."
+        },
+        "length_samples": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many frames the WAV contains."
+        },
+        "length_seconds": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "analyze": {
+      "description": "The output of `dermixen analyze --json`: the record the library would store for the file.",
+      "$ref": "#/$defs/track_record"
+    },
+    "library_scan": {
+      "type": "object",
+      "description": "The output of `dermixen library scan --json`.",
+      "additionalProperties": false,
+      "required": [
+        "library",
+        "root",
+        "added",
+        "moved",
+        "unchanged",
+        "completed",
+        "duplicates",
+        "failed",
+        "unreadable"
+      ],
+      "properties": {
+        "library": {
+          "type": "string",
+          "description": "The library file the scan wrote to."
+        },
+        "root": {
+          "type": "string",
+          "description": "The folder scanned."
+        },
+        "added": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "moved": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unchanged": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many records that had no loudness were completed with one."
+        },
+        "duplicates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "duplicate_of"
+            ],
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "duplicate_of": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "failed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "reason"
+            ],
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "unreadable": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "reason"
+            ],
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "library_query": {
+      "type": "array",
+      "description": "The output of `dermixen library query --json`: the matching records in ascending order of path.",
+      "items": {
+        "$ref": "#/$defs/track_record"
+      }
+    },
+    "library_find": {
+      "type": "array",
+      "description": "The output of `dermixen library find --json`: the best matches first.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "score",
+          "record"
+        ],
+        "properties": {
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "record": {
+            "$ref": "#/$defs/track_record"
+          }
+        }
+      }
+    },
+    "open": {
+      "type": "object",
+      "description": "The output of `dermixen open --json`.",
+      "additionalProperties": false,
+      "required": [
+        "mix",
+        "app",
+        "pid"
+      ],
+      "properties": {
+        "mix": {
+          "type": "string",
+          "description": "The mix document the window was opened on, as an absolute path with symbolic links resolved."
+        },
+        "app": {
+          "type": "string",
+          "description": "The window's executable that was started."
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The process ID of the window."
+        }
+      }
+    },
+    "mix_new": {
+      "type": "object",
+      "description": "The output of `dermixen mix new --json`.",
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The mix document written."
+        }
+      }
+    },
+    "mix_show": {
+      "type": "object",
+      "description": "The output of `dermixen mix show --json` and of `dermixen mix add --json`: the mix laid out on the timeline.",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "length_samples",
+        "length_seconds",
+        "tracks"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The mix document."
+        },
+        "length_samples": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The length of the rendered mix."
+        },
+        "length_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "position",
+              "path",
+              "hash",
+              "length_samples",
+              "grid",
+              "anchors",
+              "keylock",
+              "gain_db",
+              "start_seconds",
+              "end_seconds",
+              "tempo_nodes",
+              "volume_nodes"
+            ],
+            "properties": {
+              "position": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "The track's place in the playlist, counting from one."
+              },
+              "path": {
+                "type": "string"
+              },
+              "hash": {
+                "$ref": "#/$defs/hash"
+              },
+              "length_samples": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "grid": {
+                "$ref": "#/$defs/grid"
+              },
+              "anchors": {
+                "$ref": "#/$defs/anchors"
+              },
+              "keylock": {
+                "type": "boolean"
+              },
+              "gain_db": {
+                "type": "number",
+                "description": "The gain applied to the whole track, as docs/project-file.md describes under \"The gain\"."
+              },
+              "start_seconds": {
+                "type": "number",
+                "description": "When the track's first sample is heard, counted from the start of the rendered mix."
+              },
+              "end_seconds": {
+                "type": "number",
+                "description": "When the track's last sample has been heard, counted the same way."
+              },
+              "tempo_nodes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "volume_nodes": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "mix_plan": {
+      "type": "object",
+      "description": "The output of `dermixen mix plan --json`: the timeline `mix add` would build from the playlist, laid out as mix_show lays a document out, with the names, the key, and the tempo step a person plans by, and every warning the plan earned.",
+      "additionalProperties": false,
+      "required": [
+        "playlist",
+        "length_samples",
+        "length_seconds",
+        "keys_checked",
+        "warnings",
+        "tracks"
+      ],
+      "properties": {
+        "playlist": {
+          "type": "string",
+          "description": "The playlist file."
+        },
+        "length_samples": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The length the rendered mix would have."
+        },
+        "length_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "keys_checked": {
+          "type": "boolean",
+          "description": "Whether the keys were checked. They are not when the median key confidence across the library is under a tenth, because the Camelot codes are then noise and a clash between two of them means nothing."
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Every warning the plan earned, one sentence each, which the command also writes on standard error: a tempo step over the limit, two keys that do not fit, or an artist on more than one track."
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "position",
+              "path",
+              "hash",
+              "length_samples",
+              "grid",
+              "anchors",
+              "keylock",
+              "gain_db",
+              "start_seconds",
+              "end_seconds",
+              "tempo_nodes",
+              "volume_nodes",
+              "artist",
+              "title",
+              "camelot",
+              "tempo_step_bpm"
+            ],
+            "properties": {
+              "position": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "The track's place in the playlist, counting from one."
+              },
+              "path": {
+                "type": "string"
+              },
+              "hash": {
+                "$ref": "#/$defs/hash"
+              },
+              "length_samples": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "grid": {
+                "$ref": "#/$defs/grid"
+              },
+              "anchors": {
+                "$ref": "#/$defs/anchors"
+              },
+              "keylock": {
+                "type": "boolean"
+              },
+              "gain_db": {
+                "type": "number",
+                "description": "The gain applied to the whole track, as docs/project-file.md describes under \"The gain\"."
+              },
+              "start_seconds": {
+                "type": "number",
+                "description": "When the track's first sample is heard, counted from the start of the rendered mix."
+              },
+              "end_seconds": {
+                "type": "number",
+                "description": "When the track's last sample has been heard, counted the same way."
+              },
+              "tempo_nodes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "volume_nodes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "artist": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The artist the library records for the track, or null when it records none."
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The title the library records for the track, or null when it records none."
+              },
+              "camelot": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/camelot"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The track's Camelot code, or null when the library records no key."
+              },
+              "tempo_step_bpm": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "This track's tempo minus the tempo of the track before it, which is how far the mix tempo moves at the transition into this track. Null for the first track."
+              }
+            }
+          }
+        }
+      }
+    },
+    "mix_relink": {
+      "type": "object",
+      "description": "The output of `dermixen mix relink --json`: what became of each track's file.",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "relinked",
+        "missing",
+        "tracks"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The mix document."
+        },
+        "relinked": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many tracks now name a new path."
+        },
+        "missing": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many tracks still have no file."
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "position",
+              "path",
+              "outcome",
+              "from",
+              "reason"
+            ],
+            "properties": {
+              "position": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "The track's place in the playlist, counting from one."
+              },
+              "path": {
+                "type": "string",
+                "description": "The path the document names now."
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "kept",
+                  "relinked",
+                  "missing"
+                ]
+              },
+              "from": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The path the document named before, for a relinked track; null otherwise."
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Where the file was looked for, for a missing track; null otherwise."
+              }
+            }
+          }
+        }
+      }
+    },
+    "render": {
+      "type": "object",
+      "description": "The output of `dermixen render --json`. With `--handover`, the `handover` object says where the handover falls in the clip written.",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "length_samples",
+        "length_seconds"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The WAV or MP3 file written."
+        },
+        "length_samples": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "length_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "handover": {
+          "type": "object",
+          "description": "Present when the render was asked for with `--handover N`: the clip around the handover into track N.",
+          "additionalProperties": false,
+          "required": [
+            "into_track",
+            "from_seconds",
+            "for_seconds",
+            "rise_seconds",
+            "anchor_seconds",
+            "outgoing_end_seconds"
+          ],
+          "properties": {
+            "into_track": {
+              "type": "integer",
+              "minimum": 2,
+              "description": "The track the handover goes into, counting from one."
+            },
+            "from_seconds": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Where the clip starts, counted from the start of the mix as `mix show` counts it."
+            },
+            "for_seconds": {
+              "type": "number",
+              "minimum": 0,
+              "description": "How long the clip is."
+            },
+            "rise_seconds": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Where the incoming track's rise begins, thirty-two beats before its intro anchor, counted from the start of the clip."
+            },
+            "anchor_seconds": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Where the two anchors meet, counted from the start of the clip."
+            },
+            "outgoing_end_seconds": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Where the outgoing track's last sample is heard, counted from the start of the clip."
+            }
+          }
+        }
+      }
+    },
+    "play": {
+      "type": "object",
+      "description": "The output of `dermixen play --json`.",
+      "additionalProperties": false,
+      "required": [
+        "mix",
+        "capture",
+        "from_seconds",
+        "length_samples",
+        "length_seconds",
+        "mix_length_seconds",
+        "underruns"
+      ],
+      "properties": {
+        "mix": {
+          "type": "string",
+          "description": "The mix document played."
+        },
+        "capture": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The WAV file the frames were written to instead of a device, or null when they were played."
+        },
+        "from_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Where playing began, counted from the start of the mix."
+        },
+        "length_samples": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many frames were played."
+        },
+        "length_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "The same length in seconds."
+        },
+        "mix_length_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "The length of the whole mix, as mix show reports it."
+        },
+        "underruns": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many times the device needed frames that were not ready. Zero means the mix was heard without a gap."
+        }
+      }
+    },
+    "scoreboard": {
+      "type": "object",
+      "description": "The output of `dermixen scoreboard --json`: one row per analyzer for beats and for keys, and, when the directory holds anchor annotations, for anchors, for grids, and for phrases, each with its per-track scores.",
+      "additionalProperties": false,
+      "required": [
+        "beats",
+        "keys",
+        "anchors",
+        "grids",
+        "phrases"
+      ],
+      "properties": {
+        "beats": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "analyzer",
+              "tracks",
+              "failures",
+              "tempo_accuracy1",
+              "tempo_accuracy2",
+              "tempo_error",
+              "beat_f_measure",
+              "seconds_per_track",
+              "per_track"
+            ],
+            "properties": {
+              "analyzer": {
+                "type": "string"
+              },
+              "tracks": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "failures": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "tempo_accuracy1": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "tempo_accuracy2": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "tempo_error": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "beat_f_measure": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "seconds_per_track": {
+                "type": "number",
+                "minimum": 0
+              },
+              "per_track": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "bpm",
+                    "accuracy1",
+                    "accuracy2",
+                    "tempo_error",
+                    "f_measure",
+                    "seconds",
+                    "confidence"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "bpm": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "accuracy1": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "accuracy2": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "tempo_error": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "f_measure": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "seconds": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "confidence": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "How sure the analyzer was, from zero to one, when it answered."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "analyzer",
+              "tracks",
+              "failures",
+              "exact",
+              "weighted",
+              "seconds_per_track",
+              "per_track"
+            ],
+            "properties": {
+              "analyzer": {
+                "type": "string"
+              },
+              "tracks": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "failures": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "exact": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "weighted": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "seconds_per_track": {
+                "type": "number",
+                "minimum": 0
+              },
+              "per_track": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "key",
+                    "score",
+                    "seconds"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "score": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "seconds": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "anchors": {
+          "type": "array",
+          "description": "One row per anchor analyzer per label source, present only when the ground truth holds anchor annotations.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "analyzer",
+              "source",
+              "tracks",
+              "failures",
+              "intro",
+              "outro",
+              "begins",
+              "ends",
+              "seconds_per_track",
+              "per_track"
+            ],
+            "properties": {
+              "analyzer": {
+                "type": "string"
+              },
+              "source": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The label source the scoreboard measured the analyzer against for this row, or null for all sources together."
+              },
+              "tracks": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "failures": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "intro": {
+                "$ref": "#/$defs/position_summary"
+              },
+              "outro": {
+                "$ref": "#/$defs/position_summary"
+              },
+              "begins": {
+                "$ref": "#/$defs/position_summary"
+              },
+              "ends": {
+                "$ref": "#/$defs/position_summary"
+              },
+              "seconds_per_track": {
+                "type": "number",
+                "minimum": 0
+              },
+              "per_track": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "intro",
+                    "outro",
+                    "begins",
+                    "ends",
+                    "confidence",
+                    "seconds"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "intro": {
+                      "$ref": "#/$defs/position_score"
+                    },
+                    "outro": {
+                      "$ref": "#/$defs/position_score"
+                    },
+                    "begins": {
+                      "$ref": "#/$defs/position_score"
+                    },
+                    "ends": {
+                      "$ref": "#/$defs/position_score"
+                    },
+                    "confidence": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "seconds": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "grids": {
+          "type": "array",
+          "description": "One row per beat analyzer scored against the labeled grids, present only when the ground truth holds anchor annotations.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "analyzer",
+              "tracks",
+              "failures",
+              "tempo_accuracy1",
+              "tempo_accuracy2",
+              "tempo_error",
+              "on_beat",
+              "on_downbeat",
+              "confidence_split",
+              "seconds_per_track",
+              "per_track"
+            ],
+            "properties": {
+              "analyzer": {
+                "type": "string"
+              },
+              "tracks": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "failures": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "tempo_accuracy1": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "tempo_accuracy2": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "tempo_error": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "on_beat": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "on_downbeat": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "confidence_split": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "sure_hits",
+                  "sure_misses",
+                  "unsure_hits",
+                  "unsure_misses"
+                ],
+                "properties": {
+                  "sure_hits": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "sure_misses": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "unsure_hits": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "unsure_misses": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              },
+              "seconds_per_track": {
+                "type": "number",
+                "minimum": 0
+              },
+              "per_track": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "bpm",
+                    "accuracy1",
+                    "accuracy2",
+                    "tempo_error",
+                    "on_beat",
+                    "on_downbeat",
+                    "first_beat",
+                    "confidence",
+                    "seconds"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "bpm": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "accuracy1": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "accuracy2": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "tempo_error": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "on_beat": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "on_downbeat": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "first_beat": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "The beat of the labeled grid at which the analyzer's beat zero fell."
+                    },
+                    "confidence": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "seconds": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "phrases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "analyzer",
+              "source",
+              "tracks",
+              "failures",
+              "downbeat",
+              "phrase_labels",
+              "on_bar",
+              "on_8_bars",
+              "on_16_bars",
+              "on_32_bars",
+              "median_bars",
+              "section_labels",
+              "sections_within_bar",
+              "confidence_split",
+              "seconds_per_track",
+              "per_track"
+            ],
+            "properties": {
+              "analyzer": {
+                "type": "string"
+              },
+              "source": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The label source the scoreboard measured the analyzer against for this row, or null for all sources together."
+              },
+              "tracks": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "failures": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "downbeat": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "The share of tracks whose bar lines are the labeled ones; only the row over all sources has it."
+              },
+              "phrase_labels": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "on_bar": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "on_8_bars": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "on_16_bars": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "on_32_bars": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "median_bars": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "section_labels": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sections_within_bar": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "confidence_split": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "sure_hits",
+                  "sure_misses",
+                  "unsure_hits",
+                  "unsure_misses"
+                ],
+                "properties": {
+                  "sure_hits": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "sure_misses": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "unsure_hits": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "unsure_misses": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              },
+              "seconds_per_track": {
+                "type": "number",
+                "minimum": 0
+              },
+              "per_track": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "downbeat",
+                    "confidence",
+                    "seconds"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "downbeat": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "confidence": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "seconds": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "description": "The output of `dermixen settings show --json`, `settings set --json`, and `settings reset --json`: every setting as it stands after the command.",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "audio_buffer_frames",
+        "metronome",
+        "grid_strip_collapsed",
+        "library_collapsed",
+        "library_word_wrap",
+        "music_folder",
+        "library_file"
+      ],
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "The settings file, whether or not it exists."
+        },
+        "audio_buffer_frames": {
+          "type": "object",
+          "description": "How many frames the audio device takes per pull.",
+          "additionalProperties": false,
+          "required": [
+            "value",
+            "set"
+          ],
+          "properties": {
+            "value": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 4294967295,
+              "description": "The number of frames, or null when the device's own size is used."
+            },
+            "set": {
+              "type": "boolean",
+              "description": "Whether the file sets this setting."
+            }
+          }
+        },
+        "metronome": {
+          "type": "object",
+          "description": "Whether the grid editor's metronome is on.",
+          "additionalProperties": false,
+          "required": [
+            "value",
+            "set"
+          ],
+          "properties": {
+            "value": {
+              "type": "boolean",
+              "description": "Whether the metronome is on: the setting, or false when the file does not set it."
+            },
+            "set": {
+              "type": "boolean",
+              "description": "Whether the file sets this setting."
+            }
+          }
+        },
+        "grid_strip_collapsed": {
+          "type": "object",
+          "description": "Whether the grid editor's strip, the waveform with the grid drawn over it, is collapsed.",
+          "additionalProperties": false,
+          "required": [
+            "value",
+            "set"
+          ],
+          "properties": {
+            "value": {
+              "type": "boolean",
+              "description": "Whether the strip is collapsed: the setting, or false when the file does not set it."
+            },
+            "set": {
+              "type": "boolean",
+              "description": "Whether the file sets this setting."
+            }
+          }
+        },
+        "library_collapsed": {
+          "type": "object",
+          "description": "Whether the library panel beside the timeline is hidden, so the timeline has the whole width of the window.",
+          "additionalProperties": false,
+          "required": [
+            "value",
+            "set"
+          ],
+          "properties": {
+            "value": {
+              "type": "boolean",
+              "description": "Whether the panel is hidden: the setting, or false when the file does not set it."
+            },
+            "set": {
+              "type": "boolean",
+              "description": "Whether the file sets this setting."
+            }
+          }
+        },
+        "library_word_wrap": {
+          "type": "object",
+          "description": "Whether the text in a library panel cell wraps onto further lines.",
+          "additionalProperties": false,
+          "required": [
+            "value",
+            "set"
+          ],
+          "properties": {
+            "value": {
+              "type": "boolean",
+              "description": "Whether a cell's text wraps: the setting, or false when the file does not set it."
+            },
+            "set": {
+              "type": "boolean",
+              "description": "Whether the file sets this setting."
+            }
+          }
+        },
+        "music_folder": {
+          "type": "object",
+          "description": "The folder the person's music is in, which a scan reads when it is given no folder.",
+          "additionalProperties": false,
+          "required": [
+            "value",
+            "set"
+          ],
+          "properties": {
+            "value": {
+              "type": "string",
+              "description": "The folder in use, as a path in full: the setting, below the user's home folder when the setting is a relative path, or Music/Undefunktis below the home folder when the file does not set it."
+            },
+            "set": {
+              "type": "boolean",
+              "description": "Whether the file sets this setting."
+            }
+          }
+        },
+        "library_file": {
+          "type": "object",
+          "description": "The library file the window and the library commands open when neither --library nor DERMIXEN_LIBRARY_FILE names one.",
+          "additionalProperties": false,
+          "required": [
+            "value",
+            "set"
+          ],
+          "properties": {
+            "value": {
+              "type": "string",
+              "description": "The file in use, as a path in full: the setting, below the user's home folder when the setting is a relative path, or dermixen/library.sqlite below the user's data folder when the file does not set it."
+            },
+            "set": {
+              "type": "boolean",
+              "description": "Whether the file sets this setting."
+            }
+          }
+        }
+      }
+    },
+    "position_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scored",
+        "within_bar",
+        "within_four_bars",
+        "median_beats"
+      ],
+      "properties": {
+        "scored": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "within_bar": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "within_four_bars": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "median_beats": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "position_score": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source",
+            "error"
+          ],
+          "properties": {
+            "source": {
+              "type": "string",
+              "enum": [
+                "ear",
+                "mixmeister",
+                "plot"
+              ]
+            },
+            "error": {
+              "type": "number",
+              "description": "How far the analyzer's position sits from the label, in beats; negative when early."
+            }
+          }
+        }
+      ]
+    },
+    "phrase_record": {
+      "type": "object",
+      "description": "What the phrase analyzer found in a track: which beat of every four starts a bar, the bars that start phrases, and the bars at which the arrangement changes. Every beat is a whole beat of the record's grid, which is not moved.",
+      "additionalProperties": false,
+      "required": [
+        "analyzer",
+        "confidence",
+        "downbeat",
+        "starts",
+        "sections"
+      ],
+      "properties": {
+        "analyzer": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "downbeat": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3,
+          "description": "Bars begin at every beat that is this many beats past a whole multiple of four."
+        },
+        "starts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "beat",
+              "bars"
+            ],
+            "properties": {
+              "beat": {
+                "type": "number"
+              },
+              "bars": {
+                "type": "integer",
+                "enum": [
+                  8,
+                  16,
+                  32
+                ],
+                "description": "The longest phrase that begins at this bar."
+              }
+            }
+          }
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        }
+      }
+    }
+  }
+}

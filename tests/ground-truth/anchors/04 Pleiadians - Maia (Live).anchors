@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/artist/Pleiadians - IFO Live/04 Pleiadians - Maia (Live).mp3
+bpm 142.9936
+first_beat 1.414501
+intro 51.763809 mixmeister
+outro 610.670295 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 51.763809 mixmeister
+phrase 610.670295 mixmeister

@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/artist/Planet Ben - Trippy Future Garden [PR0014CD]/03 Planet Ben - Questionmark.mp3
+bpm 134.9939
+first_beat 0.049419
+intro 8.938339 mixmeister
+outro 528.073764 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 8.938339 mixmeister
+phrase 528.073764 mixmeister

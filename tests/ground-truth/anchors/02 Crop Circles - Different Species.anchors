@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/12-inch_&_ep/Crop Circles - Full Mental Jackpot EP [DATEP001]/02 Crop Circles - Different Species.mp3
+bpm 132.5891
+first_beat 0.182827
+intro 58.104063 mixmeister
+outro 463.568322 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 58.104063 mixmeister
+phrase 463.568322 mixmeister

@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/artist/GMS - The Growly Family [TIPCD21]/09 Dirty Harry.mp3
+bpm 145.9794
+first_beat 1.455361
+intro 35.974625 mixmeister
+outro 78.721927 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 35.974625 mixmeister
+phrase 78.721927 mixmeister

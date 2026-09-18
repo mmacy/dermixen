@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/comp/VA - Analog Trips [DATCD008]/09 Doof - Giving Godhead.wav
+bpm 127.9897
+first_beat 0.147908
+intro 15.148299 mixmeister
+outro 465.182299 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 15.148299 mixmeister
+phrase 465.182299 mixmeister

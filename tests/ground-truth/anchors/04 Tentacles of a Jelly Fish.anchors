@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/artist/GMS - The Growly Family [TIPCD21]/04 Tentacles of a Jelly Fish.mp3
+bpm 141.9847
+first_beat 0.329784
+intro 27.374993 mixmeister
+outro 433.050968 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 27.374993 mixmeister
+phrase 433.050968 mixmeister

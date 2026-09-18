@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/unreleased/GMS - Soundfarmer (FRANNY).wav
+bpm 139.9728
+first_beat 1.267110
+intro 13.268258 mixmeister
+outro 383.620488 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 13.268258 mixmeister
+phrase 383.620488 mixmeister

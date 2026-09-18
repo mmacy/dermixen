@@ -1,0 +1,8 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/artist/Gangguru - Be Your Own Guru/Gangguru - Be Your Own Guru - 32 Octogram.wav
+bpm 140.8534
+first_beat 0.494817
+intro 0.490816 mixmeister
+outro 320.825936 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 320.825936 mixmeister

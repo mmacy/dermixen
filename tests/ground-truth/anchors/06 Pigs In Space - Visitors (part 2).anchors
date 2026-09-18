@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/artist/Pigs In Space - Pigs In Space [PHNKL2106-2]/06 Pigs In Space - Visitors (part 2).mp3
+bpm 147.0281
+first_beat 1.388363
+intro -0.234601 mixmeister
+outro 409.472894 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase -0.234601 mixmeister
+phrase 409.472894 mixmeister

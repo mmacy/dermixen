@@ -1,0 +1,8 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/artist/Technossomy - Synthetic Flesh/Technossomy - Synthetic Flesh - 07 Paladean Landing.wav
+bpm 139.8550
+first_beat 0.983398
+intro 0.983810 mixmeister
+outro 392.253991 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 392.253991 mixmeister

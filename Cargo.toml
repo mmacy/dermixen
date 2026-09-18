@@ -1,0 +1,44 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/core",
+    "crates/media",
+    "crates/analysis",
+    "crates/library",
+    "crates/engine",
+    "crates/signalsmith-sys",
+    "crates/aubio-sys",
+    "crates/keyfinder-sys",
+    "crates/macos-documents-sys",
+    "crates/cli",
+    "crates/app",
+    "crates/testkit",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "GPL-3.0-or-later"
+publish = false
+repository = "https://github.com/mmacy/dermixen"
+
+[workspace.dependencies]
+dermixen-core = { path = "crates/core" }
+dermixen-media = { path = "crates/media" }
+dermixen-analysis = { path = "crates/analysis" }
+dermixen-library = { path = "crates/library" }
+dermixen-engine = { path = "crates/engine" }
+dermixen-testkit = { path = "crates/testkit" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+thiserror = "2"
+proptest = "1"
+clap = { version = "4", features = ["derive"] }
+
+[workspace.lints.rust]
+missing_docs = "warn"
+
+[profile.test]
+opt-level = 1

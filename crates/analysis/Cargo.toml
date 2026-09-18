@@ -1,0 +1,31 @@
+[package]
+name = "dermixen-analysis"
+description = "Beat grid, key, and anchor analysis with confidence reporting, and the scoreboard that measures analyzers."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dermixen-core.workspace = true
+dermixen-media.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+rustfft = "6.4.1"
+aubio-sys = { path = "../aubio-sys", optional = true }
+keyfinder-sys = { path = "../keyfinder-sys", optional = true }
+ebur128 = "0.1"
+
+[dev-dependencies]
+dermixen-testkit.workspace = true
+serde_json.workspace = true
+tempfile = "3.27.0"
+
+[features]
+aubio = ["dep:aubio-sys"]
+keyfinder = ["dep:keyfinder-sys"]

@@ -1,0 +1,8 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/12-inch_&_ep/Vedama & Spies - Photonic EP [DATEP005]/02 Vedama - Scanate.wav
+bpm 139.8840
+first_beat 1.365871
+intro 1.367018 mixmeister
+outro 368.519890 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 368.519890 mixmeister

@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/artist/MFG - Pure Energy/MFG - Pure Energy - 09 Desert Sun (Original Version).wav
+bpm 140.0611
+first_beat 0.162437
+intro 82.410249 mixmeister
+outro 390.855692 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 82.410249 mixmeister
+phrase 390.855692 mixmeister

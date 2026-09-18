@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/comp/VA - The Independence Dance Revival [PHNKL2110-2]/wav/07 X-Dream - S.T.O.P..wav
+bpm 137.7960
+first_beat 0.178230
+intro 10.627179 mixmeister
+outro 564.488269 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 10.627179 mixmeister
+phrase 564.488269 mixmeister

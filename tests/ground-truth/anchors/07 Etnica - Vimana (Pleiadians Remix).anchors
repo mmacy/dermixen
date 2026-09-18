@@ -1,0 +1,8 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/artist/Pleiadians - IFO Live/07 Etnica - Vimana (Pleiadians Remix).mp3
+bpm 146.9794
+first_beat 1.230119
+intro 1.226597 mixmeister
+outro 589.067796 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 589.067796 mixmeister

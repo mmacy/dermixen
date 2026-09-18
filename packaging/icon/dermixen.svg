@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!--
+    The Dermixen app icon. A "D" drawn as two stroked outlines, coloured from
+    blue on the left to green on the right, with two volume curves through it:
+    the blue one rises from the left edge into the top of the D's stem, and the
+    green one falls from that point through the bowl and out the right edge.
+    The three rings are the nodes of the curves. scripts/make-icon.sh renders
+    every size the bundles need from this file.
+  -->
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2d2f34"/>
+      <stop offset="1" stop-color="#1a1b1e"/>
+    </linearGradient>
+    <linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#4fb3f0"/>
+      <stop offset="1" stop-color="#9ae24a"/>
+    </linearGradient>
+    <clipPath id="round">
+      <rect x="0" y="0" width="1024" height="1024" rx="230" ry="230"/>
+    </clipPath>
+  </defs>
+
+  <rect x="0" y="0" width="1024" height="1024" rx="230" ry="230" fill="url(#plate)"/>
+  <rect x="6" y="6" width="1012" height="1012" rx="224" ry="224" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="12"/>
+
+  <g clip-path="url(#round)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- The D: the outer outline, then the counter inside it. -->
+    <path d="M 300 262 H 480 A 250 250 0 0 1 480 762 H 300 Z" stroke="url(#sweep)" stroke-width="52"/>
+    <path d="M 412 392 H 480 A 120 120 0 0 1 480 632 H 412 Z" stroke="url(#sweep)" stroke-width="42" stroke-opacity="0.85"/>
+
+    <!-- The incoming curve, in blue, rising into the top of the stem. -->
+    <path d="M -20 508 H 150 C 250 508 262 262 300 262" stroke="#4fb3f0" stroke-width="40"/>
+
+    <!-- The outgoing curve, in green, falling through the bowl and out. -->
+    <path d="M 300 262 L 588 672 Q 623 717 676 717 H 1044" stroke="#9ae24a" stroke-width="40"/>
+
+    <!-- The nodes. -->
+    <circle cx="300" cy="262" r="34" fill="#1d1e21" stroke="#4fb3f0" stroke-width="22"/>
+    <circle cx="300" cy="762" r="34" fill="#1d1e21" stroke="#4fb3f0" stroke-width="22"/>
+    <circle cx="623" cy="717" r="34" fill="#1d1e21" stroke="#9ae24a" stroke-width="22"/>
+  </g>
+</svg>

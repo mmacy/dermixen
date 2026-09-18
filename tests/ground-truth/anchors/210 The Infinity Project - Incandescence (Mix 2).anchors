@@ -1,0 +1,8 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/comp/VA - Mind Rewind 2 [DMRCD02]/210 The Infinity Project - Incandescence (Mix 2).mp3
+bpm 132.9831
+first_beat 0.104142
+intro 0.103719 mixmeister
+outro 332.174025 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 332.174025 mixmeister

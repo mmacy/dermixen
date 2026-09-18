@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/comp/VA - TIP Singles 3 [TIPCD17]/09 GMS - One Small Creature.mp3
+bpm 134.0017
+first_beat 0.015065
+intro 7.173798 mixmeister
+outro 358.212498 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 7.173798 mixmeister
+phrase 358.212498 mixmeister

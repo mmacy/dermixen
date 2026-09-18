@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+.claude/settings.local.json
+.claude/worktrees/
+target/
+*.proptest-regressions
+.venv/
+site/
+
+# Local credentials, never committed
+.env
+
+# The public release audit, never committed
+PUBLIC-RELEASE-AUDIT.md
+PUBLIC-RELEASE-PROMPT-AUDIT.diff
+
+# Agent memory stays on this machine
+.claude/agent-memory/
+
+# macOS folder metadata
+.DS_Store

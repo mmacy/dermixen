@@ -1,0 +1,15 @@
+# The Python toolchain that builds the documentation site. The app itself is
+# the Cargo workspace beside this file, and nothing here is packaged.
+[project]
+name = "dermixen-docs"
+version = "0.0.0"
+requires-python = ">=3.14"
+
+[dependency-groups]
+dev = [
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.7.6",
+]
+
+[tool.uv]
+package = false

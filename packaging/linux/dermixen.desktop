@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Dermixen
+Comment=Author a continuous DJ mix
+Exec=dermixen-app %f
+Icon=dermixen
+Terminal=false
+Categories=AudioVideo;Audio;
+MimeType=application/x-dermixen-mix;

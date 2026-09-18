@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/artist/GMS - The Growly Family [TIPCD21]/07 Slow Motion.mp3
+bpm 129.9989
+first_beat 0.066990
+intro 7.451615 mixmeister
+outro 361.923084 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 7.451615 mixmeister
+phrase 361.923084 mixmeister

@@ -1,0 +1,8 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/artist/Cosmosis - Cosmology [TRANR604CD]/05 Cosmosis - Morphic Resonance.mp3
+bpm 136.0614
+first_beat 0.477846
+intro 0.481814 mixmeister
+outro 353.258291 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 353.258291 mixmeister

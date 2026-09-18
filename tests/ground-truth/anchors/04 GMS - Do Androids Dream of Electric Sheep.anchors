@@ -1,0 +1,8 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/artist/GMS - The Hitz [TIPWCD17]/04 GMS - Do Androids Dream of Electric Sheep.mp3
+bpm 145.0218
+first_beat 1.435301
+intro 1.447755 mixmeister
+outro 287.734119 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 287.734119 mixmeister

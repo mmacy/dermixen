@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/comp/VA - Mind Rewind 2 [DMRCD02]/107 Etnica - Intense Visitation.mp3
+bpm 143.0565
+first_beat 0.105541
+intro 67.211007 mixmeister
+outro 496.690610 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 67.211007 mixmeister
+phrase 496.690610 mixmeister

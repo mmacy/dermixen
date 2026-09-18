@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/artist/Man With No Name - Moment of Truth [DICCD125]/04 Man With No Name - Evolution.mp3
+bpm 134.0143
+first_beat 1.057626
+intro 8.217159 mixmeister
+outro 359.229138 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 8.217159 mixmeister
+phrase 359.229138 mixmeister

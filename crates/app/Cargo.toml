@@ -1,0 +1,43 @@
+[package]
+name = "dermixen-app"
+description = "The desktop shell over the engine: the view-models the timeline is built from, and the window that paints them."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "dermixen_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dermixen-app"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+dermixen-analysis.workspace = true
+dermixen-core.workspace = true
+dermixen-engine.workspace = true
+dermixen-library.workspace = true
+dermixen-media.workspace = true
+dirs = "6"
+eframe = "0.36"
+egui = "0.36"
+egui_extras = "0.36"
+macos-documents-sys = { path = "../macos-documents-sys" }
+rfd = "0.17"
+
+[dev-dependencies]
+dermixen-testkit.workspace = true
+tempfile = "3"
+
+[features]
+default = ["signalsmith", "playback", "keyfinder"]
+signalsmith = ["dermixen-engine/signalsmith"]
+playback = ["dermixen-engine/playback"]
+keyfinder = ["dermixen-library/keyfinder"]

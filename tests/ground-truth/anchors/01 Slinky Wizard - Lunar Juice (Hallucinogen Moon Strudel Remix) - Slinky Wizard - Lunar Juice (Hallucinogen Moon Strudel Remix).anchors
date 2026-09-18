@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/comp/VA - First Flight [AFRCD01]/wav/01 Slinky Wizard - Lunar Juice (Hallucinogen Moon Strudel Remix) - Slinky Wizard - Lunar Juice (Hallucinogen Moon Strudel Remix).wav
+bpm 136.0148
+first_beat 0.135871
+intro 49.537498 mixmeister
+outro 437.736780 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 49.537498 mixmeister
+phrase 437.736780 mixmeister

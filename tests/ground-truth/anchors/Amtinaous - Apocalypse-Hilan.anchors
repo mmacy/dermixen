@@ -1,0 +1,9 @@
+# The grid fitted to the section markers and the cue as the intro anchor. The outro anchor is the measure marker, confirmed by ear.
+file goa/misc/Pulse-Tantrance/Amtinaous - Apocalypse-Hilan.wav
+bpm 135.9394
+first_beat 1.132930
+intro 15.224987 mixmeister
+outro 408.967005 ear
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 15.224987 mixmeister
+phrase 408.967005 ear

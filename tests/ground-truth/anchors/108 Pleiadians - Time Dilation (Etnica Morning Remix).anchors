@@ -1,0 +1,8 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/artist/Etnica - Live In Athens 1996 2CD [DATCD04]/CD1-MP3/108 Pleiadians - Time Dilation (Etnica Morning Remix).mp3
+bpm 134.6563
+first_beat 0.930350
+intro 0.948866 mixmeister
+outro 829.722109 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 829.722109 mixmeister

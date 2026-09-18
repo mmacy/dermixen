@@ -1,0 +1,16 @@
+[package]
+name = "aubio-sys"
+description = "The beat and tempo tracker from the aubio library, vendored as C and made callable from Rust."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+links = "dermixen_aubio"
+
+[lints]
+workspace = true
+
+[build-dependencies]
+cc = "1"

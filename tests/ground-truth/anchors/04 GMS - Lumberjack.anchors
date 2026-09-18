@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/comp/VA - Divi-Nations [TIPWCD06]/04 GMS - Lumberjack.mp3
+bpm 141.9998
+first_beat 0.592653
+intro 27.631746 mixmeister
+outro 399.461156 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 27.631746 mixmeister
+phrase 399.461156 mixmeister

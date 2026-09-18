@@ -1,0 +1,27 @@
+[package]
+name = "dermixen-engine"
+description = "The render graph: per-track time-stretch, EQ, and volume, summed to one mix, for offline render and real-time preview."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dermixen-core.workspace = true
+dermixen-media.workspace = true
+signalsmith-sys = { path = "../signalsmith-sys", optional = true }
+cpal = { version = "0.18", optional = true }
+thiserror.workspace = true
+
+[dev-dependencies]
+dermixen-testkit.workspace = true
+hound = "3.5.1"
+
+[features]
+signalsmith = ["dep:signalsmith-sys"]
+playback = ["dep:cpal"]

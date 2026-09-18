@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/comp/VA - Concept In Dance 2 [MM80036-2]/10 Various - Psychaos - Perception of Reality.mp3
+bpm 135.8879
+first_beat 0.051607
+intro 56.568324 mixmeister
+outro 325.023637 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 56.568324 mixmeister
+phrase 325.023637 mixmeister

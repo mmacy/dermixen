@@ -1,0 +1,83 @@
+site_name: Dermixen
+site_description: >-
+  A studio mix-authoring app: drag tracks onto a timeline, get automatic
+  beatmatched transitions, edit them, and render one continuous mix.
+repo_url: https://github.com/mmacy/dermixen
+repo_name: mmacy/dermixen
+
+theme:
+  name: material
+  # The app icon, copied from packaging/icon/dermixen.svg by scripts/make-icon.sh.
+  logo: images/dermixen-icon.svg
+  favicon: images/dermixen-icon.svg
+  palette:
+    # The toggle switches between the light and dark schemes, and the site
+    # remembers the reader's choice.
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  # Syntax highlighting for fenced and inline code. highlight tokenizes with
+  # Pygments, superfences enables the ```lang fences, and inlinehilite colors
+  # `#!lang ...` inline code.
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+
+strict: true
+
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    absolute_links: warn
+    unrecognized_links: warn
+    anchors: warn
+
+nav:
+  - Home: README.md
+  - Tutorials:
+      - Your first mix: tutorials/your-first-mix.md
+      - Editing a mix in the window: tutorials/editing-a-mix-in-the-window.md
+  - How-to guides:
+      - Scan your music: how-to/scan-your-music.md
+      - Find tracks for a mix: how-to/find-tracks-for-a-mix.md
+      - Build a mix from a tracklisting: how-to/build-a-mix-from-a-tracklisting.md
+      - Check a transition by ear: how-to/check-a-transition-by-ear.md
+      - Change a transition: how-to/change-a-transition.md
+      - Fix a beat grid: how-to/fix-a-beat-grid.md
+      - Level the tracks: how-to/level-the-tracks.md
+      - Relink moved files: how-to/relink-moved-files.md
+      - Drive Dermixen from a script: how-to/drive-dermixen-from-a-script.md
+      - Measure the analyzers: how-to/measure-the-analyzers.md
+      - Build from source: how-to/build-from-source.md
+  - Reference:
+      - The dermixen command: cli.md
+      - The window: window.md
+      - The library: library.md
+      - The project file: project-file.md
+      - Settings: settings.md
+      - Ground truth for the scoreboard: ground-truth.md
+      - Test fixtures: fixtures.md
+  - Explanation:
+      - How a mix fits together: explanation/how-a-mix-fits-together.md
+      - What you hear is what renders: explanation/what-you-hear-is-what-renders.md
+      - How analysis is trusted: explanation/how-analysis-is-trusted.md
+      - The command and agents: explanation/the-command-and-agents.md
+
+plugins:
+  - search

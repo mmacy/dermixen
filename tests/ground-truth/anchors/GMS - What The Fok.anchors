@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/unreleased/GMS - What The Fok.wav
+bpm 140.1523
+first_beat 0.679501
+intro 4.096323 mixmeister
+outro 408.228831 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 4.096323 mixmeister
+phrase 408.228831 mixmeister

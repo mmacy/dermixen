@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/12-inch_&_ep/Poly 61 - Hirabo Invaders CDS [13CDM001]/01 Poly 61 - Musta.mp3
+bpm 149.0502
+first_beat 1.525988
+intro 14.412664 mixmeister
+outro 413.754867 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 14.412664 mixmeister
+phrase 413.754867 mixmeister

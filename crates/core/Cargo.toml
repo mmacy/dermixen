@@ -1,0 +1,24 @@
+[package]
+name = "dermixen-core"
+description = "The mix document model: unit types, beat grids, the mix tempo curve, envelopes, anchors, and the project file."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dirs = "6"
+serde.workspace = true
+serde_json.workspace = true
+serde_path_to_error = "0.1"
+thiserror.workspace = true
+toml = "1.1.5"
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile = "3.27.0"

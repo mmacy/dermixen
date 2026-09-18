@@ -1,0 +1,40 @@
+[package]
+name = "dermixen-cli"
+description = "The dermixen command-line interface, a first-class product surface and the verification harness."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "dermixen"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+dermixen-core.workspace = true
+dermixen-media.workspace = true
+dermixen-analysis.workspace = true
+dermixen-library.workspace = true
+dermixen-engine.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+dirs = "6"
+
+[dev-dependencies]
+dermixen-testkit.workspace = true
+tempfile = "3"
+jsonschema = "0.51"
+
+[features]
+default = ["signalsmith", "aubio", "keyfinder", "playback", "mp3"]
+signalsmith = ["dermixen-engine/signalsmith"]
+playback = ["dermixen-engine/playback"]
+mp3 = ["dermixen-media/mp3"]
+aubio = ["dermixen-analysis/aubio"]
+keyfinder = ["dermixen-analysis/keyfinder", "dermixen-library/keyfinder"]

@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/misc/Pulse-Tantrance/Epic-Tone - Squirty Spiral.wav
+bpm 137.9043
+first_beat 1.274968
+intro 55.231107 mixmeister
+outro 492.062519 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 55.231107 mixmeister
+phrase 492.062519 mixmeister

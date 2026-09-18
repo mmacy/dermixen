@@ -1,0 +1,28 @@
+[package]
+name = "macos-documents-sys"
+description = "The documents macOS asks the app to open, such as a .dmx file double-clicked in the Finder, received through the Objective-C runtime and handed to the window as paths."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = [
+    "NSAppleEventManager",
+    "NSAppleEventDescriptor",
+    "NSNotification",
+    "NSObject",
+    "NSOperation",
+    "NSString",
+    "NSURL",
+    "block2",
+    "objc2-core-services",
+] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication"] }
+block2 = "0.6"

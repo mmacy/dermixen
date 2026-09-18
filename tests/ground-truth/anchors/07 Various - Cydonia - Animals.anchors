@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/comp/VA - Concept In Dance 2 [MM80036-2]/07 Various - Cydonia - Animals.mp3
+bpm 136.0152
+first_beat 0.198886
+intro 14.312836 mixmeister
+outro 381.332124 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 14.312836 mixmeister
+phrase 381.332124 mixmeister

@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/comp/VA - Destination Goa 6 2CD [WHYCD007]/CD1/03 Psychopod - Friagram (GMS remix).mp3
+bpm 150.0234
+first_beat 0.232521
+intro 9.821617 mixmeister
+outro 182.605805 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 9.821617 mixmeister
+phrase 182.605805 mixmeister

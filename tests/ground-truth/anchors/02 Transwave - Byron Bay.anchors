@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/artist/Transwave - Phototropic [SUB48092]/02 Transwave - Byron Bay.mp3
+bpm 129.8700
+first_beat 1.828366
+intro 73.900558 mixmeister
+outro 369.577755 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 73.900558 mixmeister
+phrase 369.577755 mixmeister

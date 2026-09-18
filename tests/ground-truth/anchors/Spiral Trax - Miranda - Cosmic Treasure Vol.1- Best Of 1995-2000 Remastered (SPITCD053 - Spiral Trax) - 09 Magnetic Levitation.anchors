@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/artist/Miranda - Cosmic Treasure Vol.1- Best Of 1995-2000 Remastered [SPITCD053]/Spiral Trax - Miranda - Cosmic Treasure Vol.1- Best Of 1995-2000 Remastered (SPITCD053 - Spiral Trax) - 09 Magnetic Levitation.wav
+bpm 139.9782
+first_beat 0.018799
+intro 56.596183 mixmeister
+outro 459.521228 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 56.596183 mixmeister
+phrase 459.521228 mixmeister

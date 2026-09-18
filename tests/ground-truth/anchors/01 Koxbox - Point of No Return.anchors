@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/artist/Koxbox - Forever After [HH1012-2]/01 Koxbox - Point of No Return.mp3
+bpm 137.9881
+first_beat 1.586222
+intro 17.239973 mixmeister
+outro 552.936882 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 17.239973 mixmeister
+phrase 552.936882 mixmeister

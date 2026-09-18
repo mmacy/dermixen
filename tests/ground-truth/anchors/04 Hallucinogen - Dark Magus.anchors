@@ -1,0 +1,8 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/artist/Hallucinogen - Twisted [BFLCD15]/04 Hallucinogen - Dark Magus.mp3
+bpm 135.9870
+first_beat 0.303646
+intro 0.298889 mixmeister
+outro 404.452222 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 404.452222 mixmeister

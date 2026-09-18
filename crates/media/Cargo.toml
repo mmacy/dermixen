@@ -1,0 +1,30 @@
+[package]
+name = "dermixen-media"
+description = "Decoding, encoding, and content hashing of audio files."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Writing MP3 files through the LAME encoder, which is C code linked from outside the workspace.
+mp3 = ["dep:mp3lame-encoder"]
+
+[dependencies]
+blake3 = "1.8.7"
+dermixen-core.workspace = true
+hound = "3.5.1"
+mp3lame-encoder = { version = "0.2.5", optional = true, features = ["std"] }
+rubato = "4.0.0"
+symphonia = { version = "0.6.1", default-features = false, features = ["mp3", "flac", "wav", "pcm", "aac", "isomp4"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+crc32fast = "1.5.1"
+dermixen-testkit.workspace = true
+tempfile = "3.27.0"

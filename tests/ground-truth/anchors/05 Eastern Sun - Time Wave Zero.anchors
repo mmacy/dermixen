@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/comp/VA - Reality of Liberation [AGRCD001]/05 Eastern Sun - Time Wave Zero.mp3
+bpm 144.9749
+first_beat 0.494455
+intro 26.980774 mixmeister
+outro 546.795102 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 26.980774 mixmeister
+phrase 546.795102 mixmeister

@@ -1,0 +1,11 @@
+# MixMeister's own analysis of the track.
+file psytrance/artist/Nervasystem - Phantasm Retrodelic EP 001/03 Nervasystem - Snaafu.mp3
+bpm 140.0002
+first_beat 0.045712
+begins 1.811156 plot
+ends 443.472109 plot
+intro 13.756440 plot
+outro 452.614150 plot
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 13.756440 plot
+phrase 452.614150 plot

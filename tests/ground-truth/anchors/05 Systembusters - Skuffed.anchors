@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/comp/VA - TIP Singles 3 [TIPCD17]/05 Systembusters - Skuffed.mp3
+bpm 146.9974
+first_beat 0.267214
+intro 13.331380 mixmeister
+outro 365.988992 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 13.331380 mixmeister
+phrase 365.988992 mixmeister

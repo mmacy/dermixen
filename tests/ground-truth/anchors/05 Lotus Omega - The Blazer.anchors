@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/comp/VA - Irresistible Meltdown [SZ61]/05 Lotus Omega - The Blazer.wav
+bpm 145.0534
+first_beat 0.971936
+intro 7.592925 mixmeister
+outro 432.815351 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 7.592925 mixmeister
+phrase 432.815351 mixmeister

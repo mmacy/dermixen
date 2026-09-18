@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/comp/VA - TIP Yellow [TIPCD01]/01 The Infinity Project - Stimuli.mp3
+bpm 137.9911
+first_beat 0.220940
+intro 28.047152 mixmeister
+outro 288.933026 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 28.047152 mixmeister
+phrase 288.933026 mixmeister

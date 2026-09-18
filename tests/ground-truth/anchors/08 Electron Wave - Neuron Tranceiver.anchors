@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/artist/Electron Wave - The Uncertainty Principle [BMPHQCD04]/08 Electron Wave - Neuron Tranceiver.wav
+bpm 139.9836
+first_beat 1.385512
+intro 11.669689 mixmeister
+outro 426.579972 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 11.669689 mixmeister
+phrase 426.579972 mixmeister

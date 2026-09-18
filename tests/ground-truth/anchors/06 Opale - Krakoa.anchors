@@ -1,0 +1,8 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/comp/VA - Analog Trips [DATCD008]/06 Opale - Krakoa.wav
+bpm 142.8597
+first_beat 0.184979
+intro 0.179592 mixmeister
+outro 584.813419 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 584.813419 mixmeister

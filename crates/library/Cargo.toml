@@ -1,0 +1,30 @@
+[package]
+name = "dermixen-library"
+description = "Folder scanning, tag metadata, the SQLite index of analysis results, and the query interface the command line and the desktop shell share."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dermixen-core.workspace = true
+dermixen-media.workspace = true
+dermixen-analysis.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+walkdir = "2"
+lofty = "0.25"
+rusqlite = { version = "0.40", features = ["bundled"] }
+
+[features]
+keyfinder = ["dermixen-analysis/keyfinder"]
+
+[dev-dependencies]
+dermixen-testkit.workspace = true
+tempfile = "3"

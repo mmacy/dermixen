@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/artist/Battle of the Future Buddhas - Digging Mud/Battle of the Future Buddhas - Digging Mud - 01 Babes and Babas.mp3
+bpm 136.0081
+first_beat 0.855389
+intro 25.558183 mixmeister
+outro 477.295747 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 25.558183 mixmeister
+phrase 477.295747 mixmeister

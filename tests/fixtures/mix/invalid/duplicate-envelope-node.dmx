@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "tracks": [
+    {
+      "path": "/Users/dermixenuser/audio/goa/track.mp3",
+      "hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "length_samples": 18522000,
+      "grid": { "first_beat_sample": 4410, "bpm": 138.0 },
+      "anchors": { "intro_beat": 64, "outro_beat": 896 },
+      "keylock": true,
+      "volume": [ { "beat": 896, "db": 0.0 }, { "beat": 896, "db": -50.0 } ],
+      "eq": { "low": [], "mid": [], "high": [] },
+      "tempo": [ { "beat": 896, "bpm": 138.0 } ]
+    }
+  ]
+}

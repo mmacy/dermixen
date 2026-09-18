@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/comp/VA - Order Odonata 3 (Tech. Use of Sound in Magick) [BFLCD19]/wav/01 Kaaya - Circular Sanctuary.wav
+bpm 132.9503
+first_beat 0.391143
+intro 29.269808 mixmeister
+outro 466.128979 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 29.269808 mixmeister
+phrase 466.128979 mixmeister

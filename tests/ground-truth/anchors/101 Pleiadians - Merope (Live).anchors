@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/artist/Pleiadians - I.F.O. [DATCD07]/101 Pleiadians - Merope (Live).wav
+bpm 137.9949
+first_beat 0.027736
+intro 69.599318 mixmeister
+outro 695.704672 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 69.599318 mixmeister
+phrase 695.704672 mixmeister

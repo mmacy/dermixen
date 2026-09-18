@@ -1,0 +1,8 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file goa/comp/VA - Mind Rewind 3 [DMRCD03]/210 Encens - Howl.mp3
+bpm 139.8482
+first_beat 0.776988
+intro 0.767937 mixmeister
+outro 440.098617 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 440.098617 mixmeister

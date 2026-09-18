@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/artist/Ubar Tmar - True [MPCD18]/06 Ubar Tmar - Rhythmism 6.mp3
+bpm 148.0106
+first_beat 0.592698
+intro 125.449910 mixmeister
+outro 611.903169 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 125.449910 mixmeister
+phrase 611.903169 mixmeister

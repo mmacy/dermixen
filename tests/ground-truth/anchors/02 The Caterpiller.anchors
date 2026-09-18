@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/artist/GMS - The Growly Family [TIPCD21]/02 The Caterpiller.mp3
+bpm 150.0003
+first_beat 1.592905
+intro 27.193167 mixmeister
+outro 398.390113 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 27.193167 mixmeister
+phrase 398.390113 mixmeister

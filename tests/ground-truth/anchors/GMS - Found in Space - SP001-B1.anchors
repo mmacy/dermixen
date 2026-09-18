@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/vinyl_rips/SP001/GMS - Found in Space - SP001-B1.mp3
+bpm 139.9617
+first_beat 0.229157
+intro 8.817694 mixmeister
+outro 343.173514 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 8.817694 mixmeister
+phrase 343.173514 mixmeister

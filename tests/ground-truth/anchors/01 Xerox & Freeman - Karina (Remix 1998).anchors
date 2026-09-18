@@ -1,0 +1,9 @@
+# The grid fitted to the section markers, the cue as the intro anchor, and the measure marker as the outro anchor.
+file psytrance/artist/Xerox & Freeman - Human Race [HMCD02]/01 Xerox & Freeman - Karina (Remix 1998).mp3
+bpm 145.0665
+first_beat 1.058572
+intro 54.004093 mixmeister
+outro 477.528593 mixmeister
+# Phrase labels: the bars the anchor labels above sit on, as bars a transition was aligned to.
+phrase 54.004093 mixmeister
+phrase 477.528593 mixmeister
