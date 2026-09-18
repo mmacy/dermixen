@@ -29,6 +29,7 @@ dirs = "7"
 [dev-dependencies]
 dermixen-testkit.workspace = true
 tempfile = "3"
+hound = "3.5.1"
 jsonschema = "0.56"
 
 [features]
