@@ -26,6 +26,7 @@
 //! recording every pull with its position and comparing each with the
 //! render of the same document at the same position.
 
+use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
@@ -36,7 +37,8 @@ use dermixen_core::{
 
 use crate::preview::{Channel, Feed, Output};
 use crate::render::{
-    BLOCK_FRAMES, Handover, RenderError, Source, mix_length, render_carrying, track_spans,
+    BLOCK_FRAMES, Handover, RenderError, Source, mix_length, panic_message, render_carrying,
+    track_spans,
 };
 use crate::stretch::TimeStretcher;
 
@@ -60,9 +62,11 @@ pub enum TransportState {
     /// moved, or given a document at or past the length.
     Ended,
     /// The preview stopped on an error, with the text a person should read:
-    /// what the loader said about a track it could not provide, or the
+    /// what the loader said about a track it could not provide, the
     /// message the output gave [`Feed::fail`](crate::Feed::fail) when its
-    /// device stopped taking frames. The frames rendered ahead
+    /// device stopped taking frames, or the words of
+    /// [`RenderError::Defect`] when the render panicked, which is a defect
+    /// in dermixen rather than anything a person did. The frames rendered ahead
     /// of the failure are thrown away, the device plays silence from the
     /// next pull on, the position holds, the other controls change nothing,
     /// and only [`stop`](Transport::stop) ends it.
@@ -109,15 +113,22 @@ pub struct TransportStatus {
     /// once for every move, and once for every replacement that the check
     /// described on [`replace`](Transport::replace) turns down. A
     /// replacement that passes the check continues the render with the
-    /// state it has, is not counted, and costs no buffering.
+    /// state it has, is not counted, and costs no buffering. A replacement
+    /// of a mix that [`dermixen_core::Mix::check`] refuses is not counted
+    /// either, since the transport keeps the document it already holds and
+    /// the render carries on.
     pub restarts: u64,
-    /// Why the render last started over on a replacement, in a sentence a
-    /// person can read, naming the part of the check that turned the
-    /// replacement down and the numbers behind it, as in `the mix tempo at
-    /// 6:32.1 changed from 135.90 to 135.87`. A replacement that the render
-    /// continues through clears it, so it stands only while the last
-    /// replacement is the one that cost a person the buffering. It is `None`
-    /// before any replacement has been made, and a move by
+    /// Why the last replacement did not take effect as it was given, in a
+    /// sentence a person can read. For a replacement that started the render
+    /// over it names the part of the check on
+    /// [`replace`](Transport::replace) that turned the replacement down and
+    /// the numbers behind it, as in `the mix tempo at 6:32.1 changed from
+    /// 135.90 to 135.87`. For a mix that [`dermixen_core::Mix::check`]
+    /// refuses it is that refusal, naming the field that is out of range,
+    /// and the render carries on with the document the transport already
+    /// holds. A replacement that the render continues through clears it, so
+    /// it stands only while the last replacement is the one it describes. It
+    /// is `None` before any replacement has been made, and a move by
     /// [`seek`](Transport::seek) neither sets nor clears it, since a person
     /// who moves the playhead has asked for the buffering that follows.
     ///
@@ -281,38 +292,51 @@ fn render_runs(
                 orders = waking.wait(orders).unwrap();
             }
         };
-        let rendered = render_carrying(
-            &run.mix,
-            Samples(run.from)..Samples(run.until),
-            &mut *load,
-            &mut *stretchers,
-            &mut |block| channel.deliver(block, run.run),
-            &mut |_| {},
-            &mut |asking_again| {
-                let mut orders = waiting.lock().unwrap();
-                // A run the transport has abandoned is about to end, so it
-                // takes no document, and the frame it would publish belongs
-                // to no run the transport is waiting on.
-                if orders.run != run.run {
-                    return None;
-                }
-                orders.boundary = asking_again.map(|at| Boundary { run: run.run, at });
-                orders.handover.take()
-            },
-        );
-        match rendered {
-            Ok(_) => channel.delivered(run.run),
-            Err(error) => {
-                // A run the transport abandoned ends with an error from the
-                // feed, and a device that stopped taking frames has already
-                // said why in words of its own. Anything else is what a
-                // person needs to read about why the preview stopped, and
-                // recording it in the feed throws away the frames rendered
-                // ahead of it as well.
-                if channel.run() == run.run && channel.failure().is_none() {
-                    channel.fail(&error.to_string());
-                }
+        // A panic in the render would otherwise end this thread and leave the
+        // device pulling a feed nothing will fill again, with the status
+        // still saying the transport is playing. Catching it here turns a
+        // defect into a failure the status reports, like every other way a
+        // run can stop. Rust prints the panic and the line it happened on to
+        // standard error before the unwinding reaches this point.
+        let rendered = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            render_carrying(
+                &run.mix,
+                Samples(run.from)..Samples(run.until),
+                &mut *load,
+                &mut *stretchers,
+                &mut |block| channel.deliver(block, run.run),
+                &mut |_| {},
+                &mut |asking_again| {
+                    let mut orders = waiting.lock().unwrap();
+                    // A run the transport has abandoned is about to end, so it
+                    // takes no document, and the frame it would publish belongs
+                    // to no run the transport is waiting on.
+                    if orders.run != run.run {
+                        return None;
+                    }
+                    orders.boundary = asking_again.map(|at| Boundary { run: run.run, at });
+                    orders.handover.take()
+                },
+            )
+        }));
+        // A run the transport abandoned ends with an error from the feed, and
+        // a device that stopped taking frames has already said why in words
+        // of its own. Anything else is what a person needs to read about why
+        // the preview stopped, and recording it in the feed throws away the
+        // frames rendered ahead of it as well.
+        let stopped_by = match rendered {
+            Ok(Ok(_)) => {
+                channel.delivered(run.run);
+                None
             }
+            Ok(Err(error)) => Some(error.to_string()),
+            Err(payload) => Some(RenderError::Defect(panic_message(payload.as_ref())).to_string()),
+        };
+        if let Some(message) = stopped_by
+            && channel.run() == run.run
+            && channel.failure().is_none()
+        {
+            channel.fail(&message);
         }
     }
 }
@@ -336,6 +360,10 @@ impl Transport {
     /// without rendering anything; the output is started all the same. An
     /// output that cannot start ends the call with [`RenderError::Output`]
     /// holding its message, and no thread is left running.
+    ///
+    /// A mix that [`dermixen_core::Mix::check`] refuses ends the call with
+    /// [`RenderError::Document`] naming the field that is out of range,
+    /// before the output is touched and before any thread is started.
     pub fn start(
         mix: Mix,
         from: Samples,
@@ -344,6 +372,7 @@ impl Transport {
         mut output: Box<dyn Output>,
         lookahead: Samples,
     ) -> Result<Transport, RenderError> {
+        mix.check().map_err(RenderError::Document)?;
         let length = mix_length(&mix).0;
         let at = from.0.clamp(0, length);
         // The feed holds the lookahead the transport was asked for, but never
@@ -671,9 +700,24 @@ impl Transport {
     /// before it bends the ramp that arrives there, so the transport turns
     /// such a replacement down and starts the render over, which is right,
     /// since the frames before it would have differed.
+    ///
+    /// A mix that [`dermixen_core::Mix::check`] refuses is turned away before
+    /// any of this. The transport goes on playing the document it already
+    /// holds, the render neither takes the new document nor starts over,
+    /// [`TransportStatus::restarts`] does not move, and
+    /// [`TransportStatus::last_restart`] holds the refusal, naming the field
+    /// that is out of range.
     pub fn replace(&mut self, mix: Mix) {
         let status = self.status();
         if matches!(status.state, TransportState::Failed(_)) {
+            return;
+        }
+        // A mix no document may hold has no safe layout, so the transport
+        // keeps the document it already holds and records why this one was
+        // turned away. The render neither takes the new document nor starts
+        // over, because nothing about what the device is playing has changed.
+        if let Err(problem) = mix.check() {
+            *self.last_restart.lock().unwrap() = Some(problem.to_string());
             return;
         }
         let held = status.state == TransportState::Paused;

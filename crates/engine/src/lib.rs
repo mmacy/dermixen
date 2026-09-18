@@ -18,7 +18,7 @@ pub use audition::{
 pub use eq::{HIGH_CROSSOVER_HZ, LOW_CROSSOVER_HZ, ThreeBandEq};
 #[cfg(feature = "playback")]
 pub use preview::CpalOutput;
-pub use preview::{Feed, Output, PlayReport, play};
+pub use preview::{Feed, Output, PlayReport, device_sample, play};
 pub use render::{
     BLOCK_FRAMES, Loader, Progress, RUN_IN, RenderError, Source, mix_length, render, render_range,
     render_to,
