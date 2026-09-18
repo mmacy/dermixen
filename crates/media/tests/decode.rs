@@ -304,7 +304,6 @@ fn wav_at_rate(path: &Path, rate: u32, frames: u32) {
 }
 
 #[test]
-#[ignore = "media-limits"]
 fn a_stated_sample_rate_outside_the_range_is_unsupported_at_once() {
     let folder = tempfile::tempdir().unwrap();
     for rate in [1, 8, 7_999, 384_001, 1_000_000] {
@@ -325,7 +324,6 @@ fn a_stated_sample_rate_outside_the_range_is_unsupported_at_once() {
 }
 
 #[test]
-#[ignore = "media-limits"]
 fn the_lowest_and_highest_sample_rates_decode() {
     let folder = tempfile::tempdir().unwrap();
     for (rate, frames) in [(8_000_u32, 800_u32), (384_000, 38_400)] {
@@ -340,7 +338,6 @@ fn the_lowest_and_highest_sample_rates_decode() {
 }
 
 #[test]
-#[ignore = "media-limits"]
 fn every_decoded_sample_is_finite_and_within_the_limit() {
     let folder = tempfile::tempdir().unwrap();
     let path = folder.path().join("hostile-float.wav");
@@ -381,7 +378,35 @@ fn every_decoded_sample_is_finite_and_within_the_limit() {
 }
 
 #[test]
-#[ignore = "media-limits"]
+fn a_header_that_overflows_the_decoding_library_is_refused() {
+    // Each file states a number that symphonia 0.6.1 multiplies out without
+    // checking: the WAV file states 65,535 channels, and the MP4 file's
+    // `stts` box states 4,294,967,295 samples. A debug build of symphonia
+    // panics on the overflow and prints the panic to the standard error.
+    // Whether the number is refused before symphonia reaches it or the panic
+    // is caught, `decode` has to answer with an error and leave the process
+    // running, so that one file like these does not end a library scan or a
+    // render.
+    for name in ["wav-65535-channels.wav", "m4a-huge-sample-count.m4a"] {
+        let path = fixture(name);
+        match decode(&path) {
+            Err(DecodeError::Corrupt {
+                path: reported,
+                message,
+            })
+            | Err(DecodeError::Unsupported {
+                path: reported,
+                message,
+            }) => {
+                assert_eq!(reported, path, "{name}");
+                assert!(!message.is_empty(), "{name}");
+            }
+            other => panic!("{name}: {:?}", other.map(|decoded| decoded.audio.len())),
+        }
+    }
+}
+
+#[test]
 fn a_track_longer_than_the_limit_is_refused_before_it_is_decoded() {
     // Each file is 64 KB of FLAC that decodes to 91 minutes of silence, which
     // is 1.9 GB of frames. One states its length in its header and the other

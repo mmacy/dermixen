@@ -12,6 +12,17 @@ python3 tools/check_prose.py docs/*.md
 
 It needs nothing beyond a Python 3 interpreter and always exits with status 0.
 
+## make_long_flac.py
+
+Writes a valid stereo FLAC file of digital silence of any length, so that the 90-minute track limit can be tested without a 90-minute file in the repository.
+
+```
+python3 tools/make_long_flac.py 91 tests/fixtures/audio/silence-91-minutes.flac
+python3 tools/make_long_flac.py 91 tests/fixtures/audio/silence-91-minutes-no-total.flac --no-total
+```
+
+Each FLAC frame is a constant subframe of 17 to 19 bytes that decodes to 65,535 stereo frames, so 91 minutes of audio is about 64 KB. `--no-total` leaves the total length out of the header, so a decoder learns the length only by decoding, which is the case that makes the decoder measure the audio as it goes. The program needs nothing beyond a Python 3 interpreter and prints the byte count, the frame count, and the length in minutes of the file it wrote.
+
 ## mmp_dump.py
 
 Reads a MixMeister Fusion `.mmp` playlist and prints what is inside it.

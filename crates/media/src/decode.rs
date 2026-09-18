@@ -1,9 +1,11 @@
 //! Reading audio files into the internal format.
 
-use std::io::Cursor;
+use std::io::{Cursor, Read};
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 
-use dermixen_core::{ContentHash, SAMPLE_RATE};
+use dermixen_core::files::open_regular;
+use dermixen_core::{ContentHash, LONGEST_TRACK, SAMPLE_RATE};
 use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{
     Async, FixedAsync, Resampler, SincInterpolationParameters, SincInterpolationType,
@@ -94,18 +96,14 @@ pub enum DecodeError {
 /// the decoded packets pass it, before the rest of the file is decoded.
 /// Every decoded sample is a finite number within [`SAMPLE_LIMIT`].
 pub fn decode(path: &Path) -> Result<Decoded, DecodeError> {
-    let bytes = std::fs::read(path).map_err(|source| DecodeError::Read {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let bytes = read_whole_file(path)?;
     let hash = ContentHash(*blake3::hash(&bytes).as_bytes());
 
-    let (interleaved, source_sample_rate, source_channels) = decode_samples(path, bytes)?;
-    let frames = to_stereo(&interleaved, source_channels);
+    let (frames, source_sample_rate, source_channels) = decode_without_panicking(path, bytes)?;
     let frames = if source_sample_rate == SAMPLE_RATE {
         frames
     } else {
-        resample(path, &frames, source_sample_rate)?
+        resample(path, frames, source_sample_rate)?
     };
 
     Ok(Decoded {
@@ -113,6 +111,62 @@ pub fn decode(path: &Path) -> Result<Decoded, DecodeError> {
         hash,
         source_sample_rate,
         source_channels,
+    })
+}
+
+/// Reads every byte of a regular file of at most [`LARGEST_AUDIO_FILE`] bytes.
+///
+/// The file is opened as [`open_regular`] opens one, so a folder, a device, or
+/// a named pipe is refused at once rather than read. The size comes from the
+/// open handle, before any of the file is read, and the read itself stops one
+/// byte past the limit, so a file that grows while it is being read is bounded
+/// too.
+fn read_whole_file(path: &Path) -> Result<Vec<u8>, DecodeError> {
+    let read = |source| DecodeError::Read {
+        path: path.to_path_buf(),
+        source,
+    };
+    let too_large = |size: u64| DecodeError::Unsupported {
+        path: path.to_path_buf(),
+        message: format!(
+            "the file is {size} bytes, and Dermixen imports an audio file of at most {LARGEST_AUDIO_FILE} bytes"
+        ),
+    };
+
+    let file = open_regular(path).map_err(|error| read(crate::hash::as_io_error(error)))?;
+    let size = file.metadata().map_err(read)?.len();
+    if size > LARGEST_AUDIO_FILE {
+        return Err(too_large(size));
+    }
+
+    let mut bytes = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
+    file.take(LARGEST_AUDIO_FILE.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(read)?;
+    if bytes.len() as u64 > LARGEST_AUDIO_FILE {
+        return Err(too_large(bytes.len() as u64));
+    }
+    Ok(bytes)
+}
+
+/// Decodes the whole file, and reports a panic from the decoding library as a
+/// damaged file.
+///
+/// Two headers reach arithmetic in symphonia 0.6.1 that overflows: a WAV file
+/// that states 32,770 channels or more, and an MP4 file whose `stts` box
+/// states 4,294,967,295 samples. A debug build of symphonia panics on the
+/// overflow and prints the panic to the standard error. Catching the panic
+/// here is what keeps one such file from ending a library scan or a render.
+fn decode_without_panicking(
+    path: &Path,
+    bytes: Vec<u8>,
+) -> Result<(Vec<Frame>, u32, u16), DecodeError> {
+    let work = AssertUnwindSafe(move || decode_samples(path, bytes));
+    std::panic::catch_unwind(work).unwrap_or_else(|_| {
+        Err(DecodeError::Corrupt {
+            path: path.to_path_buf(),
+            message: "the file's header states a number the decoder cannot work with".to_owned(),
+        })
     })
 }
 
@@ -149,11 +203,15 @@ fn audio_start(bytes: &[u8]) -> usize {
     if start <= bytes.len() { start } else { 0 }
 }
 
-/// Decodes the whole file to interleaved samples, and reports the rate and channel count it held.
+/// Decodes the whole file to stereo frames at the rate the file was stored
+/// at, and reports that rate and the channel count the file held.
+///
+/// The frames are built packet by packet, so the decoded audio is held once
+/// rather than as interleaved samples and as frames at the same time.
 ///
 /// The file's bytes are handed over rather than borrowed because the decoder
 /// reads from them for as long as it runs.
-fn decode_samples(path: &Path, bytes: Vec<u8>) -> Result<(Vec<f32>, u32, u16), DecodeError> {
+fn decode_samples(path: &Path, bytes: Vec<u8>) -> Result<(Vec<Frame>, u32, u16), DecodeError> {
     // The file name extension only tells the probe which format to try first.
     // A file whose name does not match its contents is still recognized.
     let mut hint = Hint::new();
@@ -182,12 +240,25 @@ fn decode_samples(path: &Path, bytes: Vec<u8>) -> Result<(Vec<f32>, u32, u16), D
             message: "the file holds no audio track".to_owned(),
         })?;
     let track_id = track.id;
+    let stated_frames = track.num_frames;
     let Some(CodecParameters::Audio(parameters)) = track.codec_params.clone() else {
         return Err(DecodeError::Unsupported {
             path: path.to_path_buf(),
             message: "the audio track is in a format Dermixen does not import".to_owned(),
         });
     };
+
+    // The rate the header states decides whether the file is imported at all,
+    // and it is read before a decoder is made, so a rate that no resampler can
+    // work from never reaches one.
+    if let Some(rate) = parameters.sample_rate {
+        check_rate(path, rate)?;
+        if let Some(frames) = stated_frames
+            && frames > longest_at(rate)
+        {
+            return Err(too_long(path));
+        }
+    }
 
     // Gapless decoding drops the delay an encoder inserts before the first
     // real sample and the padding it appends after the last one. Without it,
@@ -200,10 +271,13 @@ fn decode_samples(path: &Path, bytes: Vec<u8>) -> Result<(Vec<f32>, u32, u16), D
         .make_audio_decoder(&parameters, &decoder_options)
         .map_err(|error| from_symphonia(path, error))?;
 
-    let mut interleaved: Vec<f32> = Vec::new();
+    let mut frames: Vec<Frame> = Vec::new();
     let mut packet_samples: Vec<f32> = Vec::new();
     let mut source: Option<(u32, u16)> = None;
     let mut packets_seen = false;
+    // How many frames at the rate the file is stored at are as long as a
+    // track may be. The first packet that names a rate sets it.
+    let mut longest = u64::MAX;
     loop {
         let packet = match reader.next_packet() {
             Ok(Some(packet)) => packet,
@@ -232,14 +306,40 @@ fn decode_samples(path: &Path, bytes: Vec<u8>) -> Result<(Vec<f32>, u32, u16), D
         };
 
         let channels = stereo_or_fewer(path, buffer.spec().channels().count())?;
-        source = Some((buffer.spec().rate(), channels));
+        let rate = buffer.spec().rate();
+        if source.map(|(seen, _)| seen) != Some(rate) {
+            check_rate(path, rate)?;
+            longest = longest_at(rate);
+        }
+        source = Some((rate, channels));
 
         buffer.copy_to_vec_interleaved(&mut packet_samples);
-        interleaved.extend_from_slice(&packet_samples);
+        // The length is measured on every packet, so a file longer than a
+        // track may be is refused as soon as its packets pass that length
+        // rather than after the rest of the file is decoded.
+        let more = packet_samples.len() / usize::from(channels);
+        if frames.len() as u64 + more as u64 > longest {
+            return Err(too_long(path));
+        }
+        make_room(&mut frames, more, longest);
+        if channels == 1 {
+            frames.extend(packet_samples.iter().map(|sample| {
+                let sample = within_the_limit(*sample);
+                [sample, sample]
+            }));
+        } else {
+            frames.extend(
+                packet_samples
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|frame| [within_the_limit(frame[0]), within_the_limit(frame[1])]),
+            );
+        }
     }
 
     if let Some((rate, channels)) = source {
-        return Ok((interleaved, rate, channels));
+        return Ok((frames, rate, channels));
     }
     if packets_seen {
         return Err(DecodeError::Corrupt {
@@ -264,6 +364,74 @@ fn decode_samples(path: &Path, bytes: Vec<u8>) -> Result<(Vec<f32>, u32, u16), D
     Ok((Vec::new(), rate, stereo_or_fewer(path, channels.count())?))
 }
 
+/// Accepts a sample rate within [`LOWEST_SOURCE_RATE`] to
+/// [`HIGHEST_SOURCE_RATE`] and refuses any other.
+///
+/// The resampler works out how much room its output needs from the two rates,
+/// so a file that states one hertz asks it for tens of thousands of samples
+/// for every sample the file holds. Reading the rate first is what keeps that
+/// from happening.
+fn check_rate(path: &Path, rate: u32) -> Result<(), DecodeError> {
+    if (LOWEST_SOURCE_RATE..=HIGHEST_SOURCE_RATE).contains(&rate) {
+        return Ok(());
+    }
+    Err(DecodeError::Unsupported {
+        path: path.to_path_buf(),
+        message: format!(
+            "the file states a sample rate of {rate} Hz, and Dermixen imports a sample rate from {LOWEST_SOURCE_RATE} Hz to {HIGHEST_SOURCE_RATE} Hz"
+        ),
+    })
+}
+
+/// How many frames at `rate` last as long as [`LONGEST_TRACK`] does at the
+/// internal sample rate.
+fn longest_at(rate: u32) -> u64 {
+    LONGEST_TRACK.0.max(0) as u64 * u64::from(rate) / u64::from(SAMPLE_RATE)
+}
+
+/// The error for a file that holds more audio than a track may.
+fn too_long(path: &Path) -> DecodeError {
+    let minutes = LONGEST_TRACK.0 / (i64::from(SAMPLE_RATE) * 60);
+    DecodeError::Unsupported {
+        path: path.to_path_buf(),
+        message: format!(
+            "Dermixen imports a track of at most {minutes} minutes, and this one is longer"
+        ),
+    }
+}
+
+/// A sample the rest of the app can work with: silence in place of a value
+/// that is not a number, and anything larger cut down to [`SAMPLE_LIMIT`].
+///
+/// A sample already within the limit comes back unchanged, down to its bits,
+/// so a file of ordinary audio decodes to exactly what it holds.
+fn within_the_limit(sample: f32) -> f32 {
+    if sample.is_nan() {
+        0.0
+    } else {
+        sample.clamp(-SAMPLE_LIMIT, SAMPLE_LIMIT)
+    }
+}
+
+/// Makes room in `frames` for `more` frames, never reserving room for more
+/// than `longest` frames in all.
+///
+/// A vector that grows on its own doubles, so a file that runs right up to the
+/// length limit would end up with room for twice the limit. Reserving the
+/// exact amount once the doubling passes the limit keeps the memory a decode
+/// asks for close to the memory the audio takes.
+fn make_room(frames: &mut Vec<Frame>, more: usize, longest: u64) {
+    if frames.capacity() - frames.len() >= more {
+        return;
+    }
+    let longest = usize::try_from(longest).unwrap_or(usize::MAX);
+    let doubled = frames
+        .capacity()
+        .saturating_mul(2)
+        .max(frames.len().saturating_add(more));
+    frames.reserve_exact(doubled.min(longest) - frames.len());
+}
+
 /// Accepts a mono or stereo channel count and refuses any other.
 fn stereo_or_fewer(path: &Path, channels: usize) -> Result<u16, DecodeError> {
     if channels == 0 || channels > 2 {
@@ -277,27 +445,15 @@ fn stereo_or_fewer(path: &Path, channels: usize) -> Result<u16, DecodeError> {
     Ok(channels as u16)
 }
 
-/// Turns interleaved samples into stereo frames, copying a mono file to both channels.
-fn to_stereo(interleaved: &[f32], channels: u16) -> Vec<Frame> {
-    let channels = usize::from(channels);
-    interleaved
-        .chunks_exact(channels)
-        .map(|frame| {
-            if channels == 1 {
-                [frame[0], frame[0]]
-            } else {
-                [frame[0], frame[1]]
-            }
-        })
-        .collect()
-}
-
 /// Resamples stereo frames from `rate` to the internal sample rate.
 ///
 /// The pitch is unchanged and the length changes in proportion to the two
 /// rates, so a file at 48 kHz comes out about eight percent shorter in frames
 /// and exactly as long in seconds.
-fn resample(path: &Path, frames: &[Frame], rate: u32) -> Result<Vec<Frame>, DecodeError> {
+///
+/// The frames are handed over rather than borrowed, so that the memory the
+/// file was decoded into is given back before the resampled frames are built.
+fn resample(path: &Path, frames: Vec<Frame>, rate: u32) -> Result<Vec<Frame>, DecodeError> {
     let unsupported = || DecodeError::Unsupported {
         path: path.to_path_buf(),
         message: format!("the file is at {rate} Hz, which cannot be resampled to {SAMPLE_RATE} Hz"),
@@ -318,12 +474,26 @@ fn resample(path: &Path, frames: &[Frame], rate: u32) -> Result<Vec<Frame>, Deco
     let mut resampler = Async::<f32>::new_sinc(ratio, 1.1, &parameters, 1024, 2, FixedAsync::Input)
         .map_err(|_| unsupported())?;
 
-    let input =
-        InterleavedSlice::new(frames.as_flattened(), 2, frames.len()).map_err(|_| unsupported())?;
-    let output = resampler
-        .process_all(&input, frames.len(), None)
-        .map_err(|_| unsupported())?;
-    Ok(to_stereo(&output.take_data(), 2))
+    // The borrow of the frames ends with this block, so the frames the file
+    // decoded to are given back before the resampled frames are built.
+    let output = {
+        let input = InterleavedSlice::new(frames.as_flattened(), 2, frames.len())
+            .map_err(|_| unsupported())?;
+        resampler
+            .process_all(&input, frames.len(), None)
+            .map_err(|_| unsupported())?
+    };
+    drop(frames);
+
+    // Resampling a sample within the limit can overshoot it, so the output is
+    // held to the limit the way the decoded packets are.
+    let resampled = output.take_data();
+    Ok(resampled
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|frame| [within_the_limit(frame[0]), within_the_limit(frame[1])])
+        .collect())
 }
 
 /// Describes a decoding failure in terms of the file it happened on.

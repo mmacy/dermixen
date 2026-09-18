@@ -26,6 +26,13 @@ pub struct WavError {
     pub message: String,
 }
 
+/// How many bytes [`WavFile::capacity`] keeps back for the header.
+///
+/// A WAV file states the size of its audio and the size of the whole file as
+/// 32-bit numbers, so the two sizes together stay under 4 GiB. The header
+/// hound writes is 44 bytes, and this leaves room for a longer one.
+const HEADER_ROOM: u32 = 128;
+
 /// The WAV spec for stereo audio at the internal sample rate, at the given depth.
 fn spec_for(depth: WavDepth) -> WavSpec {
     let (bits_per_sample, sample_format) = match depth {
@@ -126,10 +133,18 @@ impl WavFile {
         path: &Path,
         depth: WavDepth,
     ) -> Result<WavFile, WavError> {
-        let _ = (file, depth);
-        Err(WavError {
+        let writer =
+            WavWriter::new(std::io::BufWriter::new(file), spec_for(depth)).map_err(|error| {
+                WavError {
+                    path: path.to_path_buf(),
+                    message: error.to_string(),
+                }
+            })?;
+        Ok(WavFile {
+            writer,
+            depth,
             path: path.to_path_buf(),
-            message: "writing to an open file is not implemented".to_owned(),
+            frames_written: 0,
         })
     }
 
@@ -137,8 +152,11 @@ impl WavFile {
     /// the size of its audio in 32 bits, so the audio and the header together
     /// stay under 4 GiB.
     pub fn capacity(depth: WavDepth) -> dermixen_core::Samples {
-        let _ = depth;
-        dermixen_core::Samples(i64::MAX)
+        let bytes_per_frame = match depth {
+            WavDepth::Int16 => 4,
+            WavDepth::Float32 => 8,
+        };
+        dermixen_core::Samples(i64::from((u32::MAX - HEADER_ROOM) / bytes_per_frame))
     }
 
     /// Appends frames to the file, converting them the way [`write_frame`] does.
@@ -150,6 +168,15 @@ impl WavFile {
             path: self.path.clone(),
             message: error.to_string(),
         };
+        let capacity = WavFile::capacity(self.depth).0;
+        if self.frames_written + frames.len() as i64 > capacity {
+            return Err(WavError {
+                path: self.path.clone(),
+                message: format!(
+                    "a WAV file describes at most 4 GiB, which is {capacity} frames at this depth"
+                ),
+            });
+        }
         for frame in frames {
             write_frame(&mut self.writer, frame, self.depth).map_err(to_wav_error)?;
             self.frames_written += 1;
@@ -191,7 +218,6 @@ mod limit_tests {
     use super::*;
 
     #[test]
-    #[ignore = "media-limits"]
     fn the_capacity_is_what_fits_under_four_gibibytes() {
         // Four bytes a frame at 16 bits and eight at 32. The header is 44
         // bytes at the least, and no header hound writes reaches 128.
@@ -208,7 +234,6 @@ mod limit_tests {
     }
 
     #[test]
-    #[ignore = "media-limits"]
     fn a_write_past_the_capacity_is_refused_and_writes_nothing() {
         let folder = tempfile::tempdir().unwrap();
         let path = folder.path().join("long.wav");

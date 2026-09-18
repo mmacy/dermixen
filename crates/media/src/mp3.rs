@@ -109,9 +109,9 @@ fn start_encoder() -> Result<Encoder, String> {
 ///
 /// The encoder keeps a few frames of audio until [`Mp3File::finish`]
 /// flushes them and writes the encoder's own information frame, so a file
-/// that drops before `finish` completes is incomplete. `Mp3File` removes
-/// that file in its `Drop`. A caller that needs to know the file completed
-/// must call `finish`.
+/// that drops before `finish` completes is incomplete. An `Mp3File` that
+/// opened its own path removes that file in its `Drop`. A caller that needs
+/// to know the file completed must call `finish`.
 pub struct Mp3File {
     /// The LAME encoder this file's audio goes through.
     encoder: Encoder,
@@ -119,9 +119,7 @@ pub struct Mp3File {
     /// the file and put the information frame in the room the encoder
     /// reserved there.
     file: File,
-    /// Where the file is. Every [`Mp3Error`] names this path, and the
-    /// `Drop` for `Mp3File` removes this file when `finish` has not
-    /// completed.
+    /// Where the file is. Every [`Mp3Error`] names this path.
     path: PathBuf,
     /// Samples given to [`Mp3File::write`] that have not gone to the
     /// encoder yet, interleaved and put through [`to_encoder_sample`], at
@@ -134,8 +132,13 @@ pub struct Mp3File {
     /// How many bytes are in the file so far.
     bytes_written: u64,
     /// Whether [`Mp3File::finish`] completed. The `Drop` for `Mp3File`
-    /// removes the file unless this field is true.
+    /// leaves the file alone when this field is true.
     finished: bool,
+    /// Whether this `Mp3File` opened `path` itself, which is what decides
+    /// whether its `Drop` may remove that file. [`Mp3File::create`] opens the
+    /// path and sets this true. [`Mp3File::from_file`] is given a file that
+    /// is already open and sets this false, so it never removes the path.
+    opened_the_path: bool,
 }
 
 impl Mp3File {
@@ -143,11 +146,8 @@ impl Mp3File {
     /// caller writes through [`dermixen_core::files::AtomicFile`]. `path`
     /// names the file in error messages and is never opened or removed.
     pub fn from_file(file: File, path: &Path) -> Result<Mp3File, Mp3Error> {
-        let _ = file;
-        Err(cannot_write(
-            path,
-            "writing to an open file is not implemented",
-        ))
+        let encoder = start_encoder().map_err(|message| cannot_write(path, message))?;
+        Ok(Mp3File::around(encoder, file, path, false))
     }
 
     /// Starts an MP3 file at `path`, replacing any file already there.
@@ -157,7 +157,15 @@ impl Mp3File {
         // leave an empty file where a previous export was.
         let encoder = start_encoder().map_err(|message| cannot_write(path, message))?;
         let file = File::create(path).map_err(|error| cannot_write(path, error))?;
-        Ok(Mp3File {
+        Ok(Mp3File::around(encoder, file, path, true))
+    }
+
+    /// An `Mp3File` that writes `encoder`'s bytes to `file`, which is at
+    /// `path`. `opened_the_path` says whether this `Mp3File` opened that path
+    /// itself and so may remove the file when [`Mp3File::finish`] does not
+    /// complete.
+    fn around(encoder: Encoder, file: File, path: &Path, opened_the_path: bool) -> Mp3File {
+        Mp3File {
             encoder,
             file,
             path: path.to_path_buf(),
@@ -166,7 +174,8 @@ impl Mp3File {
             frames_written: 0,
             bytes_written: 0,
             finished: false,
-        })
+            opened_the_path,
+        }
     }
 
     /// Appends frames to the file. Values outside minus one to one are
@@ -269,11 +278,14 @@ impl Mp3File {
 }
 
 impl Drop for Mp3File {
-    /// Removes the file when [`Mp3File::finish`] has not completed, because
-    /// the file on disk is then missing both the frames the encoder still
-    /// keeps and the information frame at the front.
+    /// Removes the file when [`Mp3File::create`] opened it and
+    /// [`Mp3File::finish`] has not completed, because the file on disk is
+    /// then missing both the frames the encoder still keeps and the
+    /// information frame at the front. An `Mp3File` from
+    /// [`Mp3File::from_file`] removes nothing, because whoever opened the
+    /// file decides what becomes of it.
     fn drop(&mut self) {
-        if !self.finished {
+        if !self.finished && self.opened_the_path {
             let _ = std::fs::remove_file(&self.path);
         }
     }

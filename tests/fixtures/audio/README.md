@@ -16,3 +16,7 @@ Every file in this directory has an entry in the table below giving where it cam
 | `tagged-blank.mp3` | The same, with the artist tag set and the title tag holding only spaces | Synthetic | Tag reading, blank values |
 | `tagged.flac` | `sine-440-44k.wav` encoded by the reference FLAC encoder with the same artist, title, and date as Vorbis comments | Synthetic | Tag reading, FLAC |
 | `tagged.m4a` | `sine-440-44k.wav` encoded by ffmpeg's AAC encoder with the same artist, title, and date as iTunes-style tags | Synthetic | Tag reading, MP4 |
+| `silence-91-minutes.flac` | `tools/make_long_flac.py 91`: 64 KB of FLAC that decodes to 91 minutes of digital silence, with the total length in the header | Synthetic | Decode tests, the 90-minute track limit |
+| `silence-91-minutes-no-total.flac` | The same file written with `--no-total`, so the header states no length and a decoder learns the length only by decoding | Synthetic | Decode tests, the 90-minute track limit |
+| `wav-65535-channels.wav` | A WAV header that states 65,535 channels, written by hand in front of two seconds of the 440 Hz sine | Synthetic | Decode tests, a header the decoding library overflows on |
+| `m4a-huge-sample-count.m4a` | `sine-440-44k.m4a` with the sample count in its `stts` box changed from 87 to 4,294,967,295 | Synthetic | Decode tests, a header the decoding library overflows on |

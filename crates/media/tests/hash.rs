@@ -43,7 +43,6 @@ fn a_large_file_is_hashed_whole() {
 
 #[cfg(unix)]
 #[test]
-#[ignore = "media-limits"]
 fn a_device_a_pipe_and_a_folder_are_refused_at_once() {
     let folder = tempfile::tempdir().unwrap();
     let pipe = folder.path().join("pipe.wav");
