@@ -135,20 +135,24 @@ fn alike(one: &str, other: &str) -> bool {
 
 /// Whether one word becomes the other by changing, removing, or adding one
 /// letter.
+///
+/// A search compares every word of the text with every word of every record,
+/// so this walks the letters of both words where they stand, without copying
+/// either word.
 fn one_letter_apart(one: &str, other: &str) -> bool {
-    let one: Vec<char> = one.chars().collect();
-    let other: Vec<char> = other.chars().collect();
-    let (shorter, longer) = if one.len() <= other.len() {
-        (&one, &other)
+    let one_letters = one.chars().count();
+    let other_letters = other.chars().count();
+    let (shorter, longer, difference) = if one_letters <= other_letters {
+        (one, other, other_letters - one_letters)
     } else {
-        (&other, &one)
+        (other, one, one_letters - other_letters)
     };
-    match longer.len() - shorter.len() {
+    match difference {
         // The same length: one letter may differ.
         0 => {
             shorter
-                .iter()
-                .zip(longer.iter())
+                .chars()
+                .zip(longer.chars())
                 .filter(|(left, right)| left != right)
                 .count()
                 == 1
@@ -156,18 +160,18 @@ fn one_letter_apart(one: &str, other: &str) -> bool {
         // One letter longer: the shorter word must be what is left of the
         // longer one after passing over a single letter.
         1 => {
-            let mut matched = 0;
+            let mut rest = shorter.chars().peekable();
             let mut passed = false;
-            for letter in longer {
-                if matched < shorter.len() && shorter[matched] == *letter {
-                    matched += 1;
+            for letter in longer.chars() {
+                if rest.peek() == Some(&letter) {
+                    rest.next();
                 } else if passed {
                     return false;
                 } else {
                     passed = true;
                 }
             }
-            matched == shorter.len()
+            rest.next().is_none()
         }
         _ => false,
     }

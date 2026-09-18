@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use dermixen_core::{ContentHash, Mix};
 use dermixen_media::hash_file;
 
-use crate::index::{Index, IndexError};
+use crate::index::{Index, IndexError, TrackRecord};
 use crate::scan::{ScanError, ScanOptions, scan};
 
 /// What relinking did with one track.
@@ -91,7 +91,9 @@ pub enum RelinkError {
 /// record for the hash, when a library file is given and that record's path
 /// reads and hashes to the same hash, since the library's own path may be out
 /// of date, and then to the listed files of each folder in the order the scan
-/// gave them, until one hashes to the track's hash. A file under the folders
+/// gave them, until one hashes to the track's hash. A library row that cannot
+/// be read answers nothing and the search goes on to the folders, so one
+/// damaged row costs no other track. A file under the folders
 /// is hashed at most once in one call, however many tracks are missing, and
 /// `progress` is called with each such file before it is hashed, so a caller
 /// can say what is being read.
@@ -139,7 +141,7 @@ pub fn relink(
         // the file there before it believes the record.
         let mut found = None;
         if let Some(index) = index.as_deref()
-            && let Some(record) = index.get(track.hash)?
+            && let Some(record) = readable_record(index, track.hash)?
             && contains(&record.path, track.hash)
         {
             found = Some(record.path);
@@ -171,8 +173,28 @@ pub fn relink(
     Ok(Relinked { tracks })
 }
 
+/// The library's record for a hash, with a row the library cannot read
+/// counting as no record.
+///
+/// Relinking looks for the bytes of one track in several places, and the
+/// library is the first. A row that cannot be read is one place that answers
+/// nothing, and the search goes on to the folders, so one damaged row costs
+/// that track its shortcut rather than costing every track of the mix the
+/// whole pass. A scan of the file's folder is what replaces such a row.
+fn readable_record(index: &Index, hash: ContentHash) -> Result<Option<TrackRecord>, IndexError> {
+    match index.get(hash) {
+        Err(IndexError::Record { .. }) => Ok(None),
+        other => other,
+    }
+}
+
 /// Whether the file at `path` can be read and contains the bytes `hash`
-/// names. A file that is not there, or that cannot be read, does not.
+/// names.
+///
+/// Every failure to read the file answers false, whatever the failure was:
+/// no file at the path, a permission that stops the read, an unmounted
+/// volume, or a device that reports an error. The question is whether the
+/// bytes are there to be used, and in all four cases they are not.
 fn contains(path: &Path, hash: ContentHash) -> bool {
     hash_file(path).is_ok_and(|found| found == hash)
 }

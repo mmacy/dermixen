@@ -10,9 +10,11 @@ pub const AUDIO_EXTENSIONS: [&str; 5] = ["wav", "mp3", "flac", "m4a", "mp4"];
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ScanOptions {
     /// Folders not to enter. Each is a path relative to the scan root, or an
-    /// absolute path; a folder is left out when its path is one of these or
-    /// lies under one of them. A folder of finished mixes is the usual
-    /// entry, so finished mixes never surface as source tracks.
+    /// absolute path, with `.` and `..` in it worked out and every link
+    /// followed. A folder is left out when its path is one of these or lies
+    /// under one of them, and an exclusion that names nothing on disk leaves
+    /// nothing out. A folder of finished mixes is the usual entry, so
+    /// finished mixes never surface as source tracks.
     pub exclude: Vec<PathBuf>,
 }
 
@@ -76,9 +78,13 @@ pub fn scan(root: &Path, options: &ScanOptions) -> Result<Scanned, ScanError> {
         }
     }
 
-    // An exclusion given as a relative path is read against the root; an
-    // absolute one stands on its own. Both are compared with the paths the
-    // walk builds from the root, which is why neither side is canonicalized.
+    // An exclusion given as a relative path is read against the root, and an
+    // absolute one stands on its own. Each is then resolved the way the caller
+    // resolves the root, with `.` and `..` worked out and every link followed,
+    // so that `comp/../mixes` names the same folder as `mixes`. An exclusion
+    // that names nothing on disk resolves to nothing and excludes nothing,
+    // which is right: no file that exists lies inside a folder that does not.
+    let resolved_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let excluded: Vec<PathBuf> = options
         .exclude
         .iter()
@@ -89,6 +95,7 @@ pub fn scan(root: &Path, options: &ScanOptions) -> Result<Scanned, ScanError> {
                 root.join(folder)
             }
         })
+        .filter_map(|folder| folder.canonicalize().ok())
         .collect();
 
     let mut files = Vec::new();
@@ -97,10 +104,17 @@ pub fn scan(root: &Path, options: &ScanOptions) -> Result<Scanned, ScanError> {
         .follow_links(false)
         .into_iter()
         .filter_entry(|entry| {
-            !entry.file_type().is_dir()
-                || !excluded
-                    .iter()
-                    .any(|folder| entry.path().starts_with(folder))
+            if excluded.is_empty() || !entry.file_type().is_dir() {
+                return true;
+            }
+            // The walk builds every path from the root as the caller gave it,
+            // so a folder is compared under the resolved root that the
+            // exclusions were resolved against.
+            let resolved = match entry.path().strip_prefix(root) {
+                Ok(below) => resolved_root.join(below),
+                Err(_) => entry.path().to_path_buf(),
+            };
+            !excluded.iter().any(|folder| resolved.starts_with(folder))
         });
     for step in walk {
         match step {

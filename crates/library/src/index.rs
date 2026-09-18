@@ -3,11 +3,16 @@
 
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::time::Duration;
 
 use dermixen_analysis::{Camelot, Extent, Key, Loudness};
-use dermixen_core::{Anchors, BeatGrid, Beats, Bpm, ContentHash, Decibels, Lufs, Samples, Seconds};
+use dermixen_core::{
+    Anchors, BeatGrid, Beats, Bpm, ContentHash, Decibels, LONGEST_TRACK, Lufs, MAX_BEAT, Samples,
+    Seconds,
+};
+use rusqlite::config::DbConfig;
 use rusqlite::types::{Type, Value};
-use rusqlite::{Connection, OptionalExtension, Row};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
 use crate::metadata::{Metadata, MetadataSource, Release, ReleaseDataSource};
@@ -147,6 +152,21 @@ pub enum IndexError {
     /// A read or write failed.
     #[error("the library could not be read or written: {0}")]
     Storage(String),
+    /// A row of the library file is not a track: one of its values has a type
+    /// the library never writes, or one of its numbers is outside the range a
+    /// mix document accepts.
+    ///
+    /// A scan of the folder the file sits in analyzes the file again and
+    /// stores the answer over the row, which is the remedy the message names.
+    #[error(
+        "the library file's record for {path} is damaged ({message}), so scan that file's folder again to replace the record"
+    )]
+    Record {
+        /// The file the row names.
+        path: PathBuf,
+        /// What is wrong with the row.
+        message: String,
+    },
 }
 
 /// The conditions a query places on tracks. Every condition given must hold;
@@ -238,6 +258,14 @@ anchor_confidence, anchor_analyzer, artist, title, year, metadata_source, phrase
 loudness_lufs, true_peak_db, label, catalog_number, release_title, track_number, \
 release_data_source, year_is_approximate";
 
+/// How long one opener waits for another to finish writing before it gives
+/// up.
+///
+/// Laying out a new library file takes a few milliseconds, so half a minute
+/// is room for far more programs opening one file at once than a person
+/// starts.
+const LOCK_WAIT: Duration = Duration::from_secs(30);
+
 /// An open library file.
 pub struct Index {
     connection: rusqlite::Connection,
@@ -256,8 +284,22 @@ impl Index {
     ///
     /// A file whose version is anything other than 5 is refused with
     /// [`IndexError::Schema`], which names the version the file contains and
-    /// the version this crate reads. The remedy is to scan again into a fresh
-    /// file, since everything in the library can be recomputed from the audio.
+    /// the version this crate reads. A file that contains any table, index,
+    /// view, or trigger other than the ones Dermixen writes is refused with
+    /// [`IndexError::Open`], which names the first such object. The remedy for
+    /// either refusal is to scan again into a fresh file, since everything in
+    /// the library can be recomputed from the audio.
+    ///
+    /// A file this call creates on a Unix system is readable and writable by
+    /// its owner alone, because the library names every file in the person's
+    /// music folder. A file that already exists keeps the permissions it has,
+    /// and a path that is a symbolic link stays a link with the file it points
+    /// at created that way.
+    ///
+    /// Several programs may open one new file at the same moment. Each reads
+    /// the version and lays out the tables inside one write transaction and
+    /// waits up to [`LOCK_WAIT`] for its turn, so the first opener lays the
+    /// file out and the rest read what it wrote.
     pub fn open(path: &Path) -> Result<Index, IndexError> {
         // Everything that can go wrong before the library file is open names
         // the file, because a person holding an error about a file they
@@ -268,13 +310,41 @@ impl Index {
             path: path.to_path_buf(),
             message: problem.to_string(),
         };
+        create_for_the_owner_alone(path);
+        // The flags are the ones rusqlite opens with, less SQLITE_OPEN_URI, so
+        // that a path beginning `file:` names a file of that name rather than a
+        // URI whose query string chooses the database and its settings.
+        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX;
         // SQLite reads nothing until it is asked to, so a file that is not a
         // database opens here and fails at the first query below.
-        let mut connection = Connection::open(path).map_err(opening)?;
-        let version: u32 = connection
+        let mut connection = Connection::open_with_flags(path, flags).map_err(opening)?;
+        // Defensive mode refuses every write to the layout itself and every
+        // write to a shadow table, and an untrusted schema refuses to run the
+        // functions and virtual tables a view, a trigger, or an index names.
+        // Together they keep a file somebody else wrote from running anything
+        // of its own while Dermixen reads it.
+        connection
+            .set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)
+            .map_err(opening)?;
+        connection
+            .pragma_update(None, "trusted_schema", false)
+            .map_err(opening)?;
+        connection.busy_timeout(LOCK_WAIT).map_err(opening)?;
+        // Reading the version, counting the objects, and laying out the tables
+        // happen in one write transaction, which the first statement takes
+        // rather than the first write. Two programs opening one new file at the
+        // same moment therefore take that transaction in turn, and the second
+        // reads the version the first wrote instead of finding an empty file
+        // half laid out.
+        let opening_up = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(opening)?;
+        let version: u32 = opening_up
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .map_err(opening)?;
-        let empty: i64 = connection
+        let objects: i64 = opening_up
             .query_row("SELECT count(*) FROM sqlite_master", [], |row| row.get(0))
             .map_err(opening)?;
         // A file nobody has written yet contains no tables and no version, and
@@ -282,20 +352,26 @@ impl Index {
         // tables and the version are written together, so an interruption
         // part way through leaves the file as empty as it was rather than
         // leaving tables behind that no version claims.
-        if version == 0 && empty == 0 {
-            let laying_out = connection.transaction().map_err(opening)?;
-            laying_out.execute_batch(SCHEMA).map_err(opening)?;
-            laying_out
+        if version == 0 && objects == 0 {
+            opening_up.execute_batch(SCHEMA).map_err(opening)?;
+            opening_up
                 .pragma_update(None, "user_version", SCHEMA_VERSION)
                 .map_err(opening)?;
-            laying_out.commit().map_err(opening)?;
         } else if version != SCHEMA_VERSION {
             return Err(IndexError::Schema {
                 path: path.to_path_buf(),
                 found: version,
                 expected: SCHEMA_VERSION,
             });
+        } else if let Some(foreign) = foreign_object(&opening_up).map_err(opening)? {
+            return Err(IndexError::Open {
+                path: path.to_path_buf(),
+                message: format!(
+                    "it contains the {foreign}, which dermixen did not write, so scan again into a new library file"
+                ),
+            });
         }
+        opening_up.commit().map_err(opening)?;
         Ok(Index {
             connection,
             path: path.to_path_buf(),
@@ -356,27 +432,47 @@ impl Index {
     }
 
     /// The record with this hash, if there is one.
+    ///
+    /// A row that is not a record, because a value has a type the library
+    /// never writes or a number lies outside the range a mix document accepts,
+    /// is [`IndexError::Record`] naming the file the row holds.
     pub fn get(&self, hash: ContentHash) -> Result<Option<TrackRecord>, IndexError> {
-        self.connection
-            .query_row(
-                &format!("SELECT {COLUMNS} FROM tracks WHERE hash = ?1"),
-                [hash.to_string()],
-                read_record,
-            )
-            .optional()
-            .map_err(storage)
+        self.one(
+            &format!("SELECT {COLUMNS} FROM tracks WHERE hash = ?1"),
+            [hash.to_string()],
+        )
     }
 
     /// The record whose file was last seen at this path, if there is one.
+    ///
+    /// A row that is not a record is [`IndexError::Record`], as it is for
+    /// [`Index::get`].
     pub fn get_by_path(&self, path: &Path) -> Result<Option<TrackRecord>, IndexError> {
-        self.connection
-            .query_row(
-                &format!("SELECT {COLUMNS} FROM tracks WHERE path = ?1"),
-                [path_text(path)],
-                read_record,
-            )
+        self.one(
+            &format!("SELECT {COLUMNS} FROM tracks WHERE path = ?1"),
+            [path_text(path)],
+        )
+    }
+
+    /// The one record a query for a single track gives, the row it cannot read
+    /// as an error, or nothing when no row matched.
+    fn one<P: rusqlite::Params>(
+        &self,
+        sql: &str,
+        parameters: P,
+    ) -> Result<Option<TrackRecord>, IndexError> {
+        let found = self
+            .connection
+            .query_row(sql, parameters, |row| {
+                Ok((path_of(row), usable_record(row)))
+            })
             .optional()
-            .map_err(storage)
+            .map_err(storage)?;
+        match found {
+            None => Ok(None),
+            Some((_path, Ok(record))) => Ok(Some(record)),
+            Some((path, Err(message))) => Err(IndexError::Record { path, message }),
+        }
     }
 
     /// Records that the file with this hash is now at `path`. Returns whether
@@ -394,7 +490,26 @@ impl Index {
 
     /// Every record that meets all of the query's conditions, in ascending
     /// order of path.
+    ///
+    /// A row that cannot be read is left out, as
+    /// [`Index::query_with_skipped`] describes, and only the count of those
+    /// rows is missing here.
     pub fn query(&self, query: &Query) -> Result<Vec<TrackRecord>, IndexError> {
+        Ok(self.query_with_skipped(query)?.0)
+    }
+
+    /// The records a query matches, with the number of matching rows that
+    /// could not be read.
+    ///
+    /// A row with a value of the wrong type, text that is not UTF-8, a number
+    /// that is not finite, or a number a mix document would refuse is left
+    /// out and counted, so that one damaged row costs the person that row and
+    /// not the whole library. [`Index::query`] returns the same records
+    /// without the count.
+    pub fn query_with_skipped(
+        &self,
+        query: &Query,
+    ) -> Result<(Vec<TrackRecord>, usize), IndexError> {
         // A condition that is a plain comparison of one column is asked of
         // SQLite. Three of them are not: a folder must match whole path
         // components, a key must mix well rather than match, and artist and
@@ -468,18 +583,26 @@ impl Index {
         };
 
         let mut statement = self.connection.prepare(&sql).map_err(storage)?;
-        let found = statement
-            .query_map(rusqlite::params_from_iter(&values), read_record)
+        let mut found = statement
+            .query(rusqlite::params_from_iter(&values))
             .map_err(storage)?;
         let mut records = Vec::new();
-        for record in found {
-            let record = record.map_err(storage)?;
-            if matches(&record, query) {
-                records.push(record);
+        let mut skipped = 0;
+        // A failure to read the next row is a failure of the library file
+        // itself and stops the query. A failure to read the row that arrived
+        // costs that row alone.
+        while let Some(row) = found.next().map_err(storage)? {
+            match usable_record(row) {
+                Ok(record) => {
+                    if matches(&record, query) {
+                        records.push(record);
+                    }
+                }
+                Err(_reason) => skipped += 1,
             }
         }
         records.sort_by(|left, right| left.path.cmp(&right.path));
-        Ok(records)
+        Ok((records, skipped))
     }
 
     /// How many tracks the library contains.
@@ -495,6 +618,203 @@ impl Index {
     pub fn is_empty(&self) -> Result<bool, IndexError> {
         Ok(self.len()? == 0)
     }
+}
+
+/// Creates the library file, readable and writable by its owner alone, when
+/// nothing is at that path yet.
+///
+/// SQLite would create the file itself with whatever the process umask allows,
+/// which on most systems lets every local user read it, and a library names
+/// every audio file in a person's music folder. A file that already exists
+/// keeps the permissions it has, because the permissions are the person's to
+/// choose.
+///
+/// A path that is a symbolic link names the file SQLite writes, so the file
+/// created here is the one the link points at, however many links lead there.
+/// The link is left as it is. A link pointing at another link is followed for
+/// [`LINKS_FOLLOWED`] steps, which ends a chain that leads back to itself.
+///
+/// Nothing is reported when the file cannot be created. SQLite opens the same
+/// path next and says what went wrong, and the one case where SQLite succeeds
+/// after this call fails is a path that already exists, which is the case
+/// where there is nothing to create.
+#[cfg(unix)]
+fn create_for_the_owner_alone(path: &Path) {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut target = path.to_path_buf();
+    for _ in 0..LINKS_FOLLOWED {
+        let Ok(next) = std::fs::read_link(&target) else {
+            break;
+        };
+        target = match target.parent() {
+            // A link's target is read against the folder the link sits in.
+            Some(folder) if next.is_relative() => folder.join(next),
+            _ => next,
+        };
+    }
+    let _ = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&target);
+}
+
+/// How many symbolic links [`create_for_the_owner_alone`] follows from the
+/// library path before it gives up. A person's library path leads through one
+/// link at most, and a chain this long is a chain that leads back to itself.
+#[cfg(unix)]
+const LINKS_FOLLOWED: u32 = 16;
+
+/// Leaves the library file to SQLite to create, which is what happens on a
+/// system with no Unix permissions.
+#[cfg(not(unix))]
+fn create_for_the_owner_alone(_path: &Path) {}
+
+/// The first table, index, view, or trigger in the file that Dermixen does not
+/// write, named as a kind and a name, or `None` when the file contains only
+/// what Dermixen writes.
+///
+/// A file that holds a trigger, a view, or a table Dermixen did not write is
+/// a file some other program or person has shaped. What a read of that file
+/// would answer, and what a write into it would set off, follow from that
+/// other program's objects rather than from Dermixen's, so Dermixen refuses
+/// the file whole.
+fn foreign_object(connection: &Connection) -> rusqlite::Result<Option<String>> {
+    let mut statement = connection.prepare("SELECT type, name FROM sqlite_master")?;
+    let mut objects = statement.query([])?;
+    while let Some(object) = objects.next()? {
+        let kind: String = object.get(0)?;
+        let name: String = object.get(1)?;
+        if !is_ours(&kind, &name) {
+            return Ok(Some(format!("{kind} named {name}")));
+        }
+    }
+    Ok(None)
+}
+
+/// Whether one object of a library file is one Dermixen writes: the `tracks`
+/// table, the `tracks_by_path` index, or the index SQLite makes for itself to
+/// hold the table's text primary key.
+fn is_ours(kind: &str, name: &str) -> bool {
+    match kind {
+        "table" => name == "tracks",
+        "index" => name == "tracks_by_path" || name.starts_with("sqlite_autoindex_tracks_"),
+        _ => false,
+    }
+}
+
+/// One row as a record the rest of the app can use, or the reason the row is
+/// not one.
+fn usable_record(row: &Row<'_>) -> Result<TrackRecord, String> {
+    let record = read_record(row).map_err(|problem| problem.to_string())?;
+    match refused(&record) {
+        Some(reason) => Err(reason),
+        None => Ok(record),
+    }
+}
+
+/// The reason a mix document would refuse a record's numbers, or `None` when
+/// every number is one a document accepts.
+///
+/// The limits are the ones `DESIGN.md` states under "Limits": a tempo from
+/// [`Bpm::LOWEST`] to [`Bpm::HIGHEST`], a length from nothing to
+/// [`LONGEST_TRACK`], a first beat within [`LONGEST_TRACK`] of the track's
+/// first sample either way, an anchor on a whole beat within [`MAX_BEAT`] of
+/// beat zero either way, and every other number finite. A record that fails
+/// one of these would be refused the moment a person dragged the track onto a
+/// timeline, so the library leaves it out of a query rather than offering a
+/// track no mix can hold.
+fn refused(record: &TrackRecord) -> Option<String> {
+    let bpm = record.grid.bpm.0;
+    if !bpm.is_finite() || bpm < Bpm::LOWEST.0 || bpm > Bpm::HIGHEST.0 {
+        return Some(format!(
+            "the tempo {bpm} is outside {} to {} beats per minute",
+            Bpm::LOWEST.0,
+            Bpm::HIGHEST.0
+        ));
+    }
+    let length = record.length.0;
+    if !(0..=LONGEST_TRACK.0).contains(&length) {
+        return Some(format!(
+            "the length {length} samples is negative, or longer than the {} samples a track may last",
+            LONGEST_TRACK.0
+        ));
+    }
+    let first_beat = record.grid.first_beat.0;
+    if first_beat.saturating_abs() > LONGEST_TRACK.0 {
+        return Some(format!(
+            "the first beat at sample {first_beat} is further than {} samples from the start of the track",
+            LONGEST_TRACK.0
+        ));
+    }
+    for (which, beat) in [
+        ("intro", record.anchors.intro),
+        ("outro", record.anchors.outro),
+    ] {
+        if !beat.is_whole() || beat.0.abs() > MAX_BEAT.0 {
+            return Some(format!(
+                "the {which} anchor at beat {} is not a whole beat within {} beats of beat zero",
+                beat.0, MAX_BEAT.0
+            ));
+        }
+    }
+    let confidences = [
+        ("grid", record.grid_confidence),
+        ("anchor", record.anchor_confidence),
+    ]
+    .into_iter()
+    .chain(record.key.as_ref().map(|key| ("key", key.confidence)))
+    .chain(
+        record
+            .phrases
+            .as_ref()
+            .map(|found| ("phrase", found.confidence)),
+    );
+    for (which, confidence) in confidences {
+        if !confidence.is_finite() {
+            return Some(format!(
+                "the {which} confidence {confidence} is not a number"
+            ));
+        }
+    }
+    if let Some(loudness) = record.loudness
+        && (!loudness.integrated.0.is_finite() || !loudness.true_peak.0.is_finite())
+    {
+        return Some(format!(
+            "the loudness {} LUFS with a true peak of {} decibels is not a measurement",
+            loudness.integrated.0, loudness.true_peak.0
+        ));
+    }
+    if let Some(found) = record.phrases.as_ref() {
+        let beats = found
+            .starts
+            .iter()
+            .map(|start| start.beat)
+            .chain(found.sections.iter().copied());
+        for beat in beats {
+            if !beat.0.is_finite() {
+                return Some(format!("the phrase analysis names beat {}", beat.0));
+            }
+        }
+    }
+    None
+}
+
+/// The file a row names, for an error about that row. A row whose path is not
+/// text is named by that text read as far as it can be, and a row with no path
+/// at all is named by the hash that identifies the track.
+fn path_of(row: &Row<'_>) -> PathBuf {
+    if let Ok(text) = row.get::<_, String>(1) {
+        return PathBuf::from(text);
+    }
+    if let Ok(bytes) = row.get::<_, Vec<u8>>(1) {
+        return PathBuf::from(String::from_utf8_lossy(&bytes).into_owned());
+    }
+    let hash = row
+        .get::<_, String>(0)
+        .unwrap_or_else(|_| "an unnamed track".to_owned());
+    PathBuf::from(hash)
 }
 
 /// Whether a record meets the conditions that SQLite was not asked about.
