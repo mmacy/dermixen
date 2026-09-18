@@ -674,7 +674,6 @@ fn run_sql(path: &Path, sql: &str) {
 }
 
 #[test]
-#[ignore = "library-hardening"]
 fn eight_openers_of_one_new_library_file_all_succeed() {
     for round in 0..10 {
         let dir = tempfile::tempdir().unwrap();
@@ -697,7 +696,6 @@ fn eight_openers_of_one_new_library_file_all_succeed() {
 }
 
 #[test]
-#[ignore = "library-hardening"]
 fn a_row_that_cannot_be_read_costs_only_that_row() {
     let damage = [
         "UPDATE tracks SET bpm = 'fast' WHERE path = '/music/b.mp3'",
@@ -746,7 +744,6 @@ fn a_row_that_cannot_be_read_costs_only_that_row() {
 }
 
 #[test]
-#[ignore = "library-hardening"]
 fn a_library_file_with_anything_dermixen_did_not_write_in_it_is_refused() {
     let planted = [
         (
@@ -789,7 +786,6 @@ fn a_path_that_looks_like_a_sqlite_uri_names_a_file() {
 
 #[cfg(unix)]
 #[test]
-#[ignore = "library-hardening"]
 fn a_new_library_file_is_for_its_owner_alone() {
     use std::os::unix::fs::PermissionsExt;
     let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;

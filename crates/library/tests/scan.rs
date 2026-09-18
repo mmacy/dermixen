@@ -186,7 +186,6 @@ fn symbolic_links_are_not_followed() {
 }
 
 #[test]
-#[ignore = "library-hardening"]
 fn an_exclusion_written_with_two_dots_still_excludes() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("music");

@@ -305,7 +305,6 @@ fn a_wav_info_chunk_gives_the_title_and_the_artist() {
 }
 
 #[test]
-#[ignore = "library-hardening"]
 fn a_tag_of_any_size_is_stored_up_to_the_longest_tag() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("huge-title.wav");

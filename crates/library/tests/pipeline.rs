@@ -501,7 +501,6 @@ impl dermixen_analysis::BeatAnalyzer for PanicsOnShortTracks {
 }
 
 #[test]
-#[ignore = "library-hardening"]
 fn a_file_that_panics_the_analysis_fails_alone_and_the_scan_goes_on() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("music");

@@ -268,7 +268,9 @@ pub enum ScanIntoError {
 /// and its loudness measured, the rest of the record is left as it was, and
 /// the scan reports [`Change::Completed`]. A new hash means the file is
 /// analyzed with `analyzers` and stored. A file that cannot be decoded or
-/// analyzed is recorded in the summary and the scan goes on. `progress` is
+/// analyzed is recorded in the summary and the scan goes on, and a file whose
+/// decoding or analysis panics is recorded the same way, with the panic's
+/// message as the reason. `progress` is
 /// called once per file, in the order the files were found, and answers
 /// whether the scan goes on: `false` ends the scan after that file, with
 /// the summary's `stopped` set and the files after it untouched. Only a
@@ -312,6 +314,34 @@ pub fn scan_into(
     Ok(summary)
 }
 
+/// Runs work that decodes or analyzes one file, turning a panic in that work
+/// into the reason that one file failed.
+///
+/// A decoder or an analyzer that meets a file it was never written for can
+/// panic, and a panic that escapes ends the whole scan and every scan after it
+/// at the same file. Catching it here costs the person that one file and
+/// leaves the rest of the folder to be scanned.
+///
+/// The analyzers this call wraps hold no state that a panic part way through
+/// could leave half changed: each takes the audio and answers, and the scan
+/// gives the answer straight to the library. Nothing the caught work touched
+/// is read again, since the file it was working on is recorded as failed and
+/// nothing of that file is stored. A panic that would have to unwind through
+/// a foreign library, such as the key detector, never reaches here, because
+/// Rust ends the process at that boundary instead. The panic itself still
+/// prints to the error output, as every panic does, so a defect stays visible
+/// while the scan goes on.
+fn without_panicking<T>(work: impl FnOnce() -> T) -> Result<T, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).map_err(|panic| {
+        let message = panic
+            .downcast_ref::<&str>()
+            .map(|message| (*message).to_owned())
+            .or_else(|| panic.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "the panic gave no message".to_owned());
+        format!("reading this file panicked: {message}")
+    })
+}
+
 /// Brings the library up to date with one file. A duplicate and a failure are
 /// the two outcomes with more to say than which they were, so the scan
 /// records the detail of each in `summary`.
@@ -341,16 +371,22 @@ fn deal_with(
             if record.loudness.is_some() {
                 return Ok(Change::Unchanged);
             }
-            let decoded = match decode(file) {
-                Ok(decoded) => decoded,
-                Err(problem) => {
+            let measured =
+                without_panicking(|| decode(file).map(|decoded| measure_loudness(&decoded.audio)));
+            let measured = match measured {
+                Ok(Ok(measured)) => measured,
+                Ok(Err(problem)) => {
                     summary
                         .failed
                         .push((file.to_path_buf(), problem.to_string()));
                     return Ok(Change::Failed);
                 }
+                Err(panic) => {
+                    summary.failed.push((file.to_path_buf(), panic));
+                    return Ok(Change::Failed);
+                }
             };
-            let Some(loudness) = measure_loudness(&decoded.audio) else {
+            let Some(loudness) = measured else {
                 // The meter finds nothing in a track quieter than its gate,
                 // shorter than its block, or silent, and there is nothing to
                 // store for one, so the record stays as it is. A record can
@@ -369,15 +405,22 @@ fn deal_with(
         index.set_path(hash, file)?;
         return Ok(Change::Moved);
     }
-    match analyze_file(file, analyzers) {
-        Ok(record) => {
+    // The catch goes around the decoding and the analysis alone. A failure to
+    // read or write the library is the caller's to hear about, so the library
+    // calls stay outside it.
+    match without_panicking(|| analyze_file(file, analyzers)) {
+        Ok(Ok(record)) => {
             index.upsert(&record)?;
             Ok(Change::Added)
         }
-        Err(problem) => {
+        Ok(Err(problem)) => {
             summary
                 .failed
                 .push((file.to_path_buf(), problem.to_string()));
+            Ok(Change::Failed)
+        }
+        Err(panic) => {
+            summary.failed.push((file.to_path_buf(), panic));
             Ok(Change::Failed)
         }
     }
