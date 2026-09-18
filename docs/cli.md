@@ -9,7 +9,7 @@
 | 0 | The command succeeded. |
 | 1 | The command failed. One line beginning `error:` on standard error says why, naming the file or field concerned, and nothing is printed on standard output. |
 | 2 | The command line could not be parsed: an unknown command or option, a missing argument, or a flag given twice. The usage text is on standard error. A value the command cannot read or refuses, such as `--bpm fast`, a tempo of zero, or a preset name it does not know, is a failure with exit code 1 and a message naming the option. |
-| 3 | The command met a defect in dermixen itself. One line beginning `error:` on standard error names the file and line the defect happened at and what it said. The command stopped where it was, whatever it had finished writing is in place, and a file it was part way through writing was not replaced. A command that ends this way is worth reporting. |
+| 3 | The command met a defect in dermixen itself and stopped. One line beginning `error:` on standard error names the file and line the defect happened at and what it said. Whatever the command had finished writing is in place, and a file it was part way through writing was not replaced. A command that ends this way is worth reporting. A defect a command catches and deals with, such as a file a scan cannot decode, neither stops the command nor changes its exit code. The scan reports that one file as failed on a line of its own, goes on through the rest of the folder, and succeeds. |
 
 Progress and warnings go to standard error, so standard output contains only the result. `dermixen --version` prints the name and the version and exits with code 0.
 

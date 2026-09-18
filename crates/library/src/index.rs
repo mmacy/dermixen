@@ -15,7 +15,7 @@ use rusqlite::types::{Type, Value};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
-use crate::metadata::{Metadata, MetadataSource, Release, ReleaseDataSource};
+use crate::metadata::{LONGEST_TAG, Metadata, MetadataSource, Release, ReleaseDataSource};
 
 /// The version of the library file's layout this crate reads and writes.
 ///
@@ -250,13 +250,109 @@ CREATE TABLE tracks (
 );
 CREATE INDEX tracks_by_path ON tracks (path);";
 
-/// The columns of `tracks`, in the order [`read_record`] reads them.
-const COLUMNS: &str = "hash, path, length_samples, first_beat_sample, bpm, \
-grid_confidence, grid_analyzer, key_name, key_camelot, key_confidence, \
-key_analyzer, begins_sample, ends_sample, intro_beat, outro_beat, \
-anchor_confidence, anchor_analyzer, artist, title, year, metadata_source, phrases, \
-loudness_lufs, true_peak_db, label, catalog_number, release_title, track_number, \
-release_data_source, year_is_approximate";
+/// The most characters of a path a read keeps.
+///
+/// A path longer than this names no file on any system Dermixen runs on.
+/// Linux accepts 4,096 bytes in a path and macOS accepts 1,024, and every
+/// character takes at least one byte, so a path of more than 4,096 characters
+/// is longer than either system allows. A path is the one text a read never
+/// cuts, because a cut path names another file, so a read asks SQLite for one
+/// character more than this limit and [`read_record`] refuses a row whose
+/// path is longer. Such a row is one the library cannot read, which
+/// [`Index::query_with_skipped`] counts.
+const LONGEST_PATH: usize = 4_096;
+
+/// The most characters of a phrase analysis a read keeps.
+///
+/// The phrase column holds the JSON the analysis serializes to rather than a
+/// tag, and JSON cut short parses as nothing, so the limit sits above the
+/// longest analysis Dermixen writes instead of at [`LONGEST_TAG`]. A track
+/// lasts at most [`LONGEST_TRACK`], which is 90 minutes, and a tempo is at
+/// most [`Bpm::HIGHEST`], so a track holds fewer than 90,000 beats and fewer
+/// than 22,500 bars. The analysis names each bar once among its phrase starts
+/// and once among its section changes, in fewer than 50 characters together,
+/// which is under a million characters for the longest and fastest track
+/// there can be. A column longer than this limit is one no analysis wrote,
+/// and the cut value parses as nothing, so the row is reported as damaged.
+const LONGEST_PHRASES: usize = 2 * 1024 * 1024;
+
+/// Every column of `tracks`, in the order [`Index::upsert`] writes them and
+/// [`read_record`] reads them, with the most characters of the column a read
+/// keeps when the column holds text.
+///
+/// A column with no limit holds a number. A read asks for that column as a
+/// number, so a value of any other type in it is refused rather than read as
+/// the text of its digits, and no text of that column ever crosses into this
+/// crate.
+const COLUMNS: [(&str, Option<usize>); 30] = [
+    ("hash", Some(LONGEST_TAG)),
+    // A read keeps one character more than a path may have, so that
+    // [`read_record`] can tell a path at the limit from a longer one.
+    ("path", Some(LONGEST_PATH + 1)),
+    ("length_samples", None),
+    ("first_beat_sample", None),
+    ("bpm", None),
+    ("grid_confidence", None),
+    ("grid_analyzer", Some(LONGEST_TAG)),
+    ("key_name", Some(LONGEST_TAG)),
+    ("key_camelot", Some(LONGEST_TAG)),
+    ("key_confidence", None),
+    ("key_analyzer", Some(LONGEST_TAG)),
+    ("begins_sample", None),
+    ("ends_sample", None),
+    ("intro_beat", None),
+    ("outro_beat", None),
+    ("anchor_confidence", None),
+    ("anchor_analyzer", Some(LONGEST_TAG)),
+    ("artist", Some(LONGEST_TAG)),
+    ("title", Some(LONGEST_TAG)),
+    ("year", None),
+    ("metadata_source", Some(LONGEST_TAG)),
+    ("phrases", Some(LONGEST_PHRASES)),
+    ("loudness_lufs", None),
+    ("true_peak_db", None),
+    ("label", Some(LONGEST_TAG)),
+    ("catalog_number", Some(LONGEST_TAG)),
+    ("release_title", Some(LONGEST_TAG)),
+    ("track_number", None),
+    ("release_data_source", Some(LONGEST_TAG)),
+    ("year_is_approximate", None),
+];
+
+/// The column names in the order [`COLUMNS`] lists them, which is the order
+/// an insert names its values in.
+fn written_columns() -> String {
+    let names: Vec<&str> = COLUMNS.iter().map(|(name, _)| *name).collect();
+    names.join(", ")
+}
+
+/// What a read asks SQLite for: every column in the order [`COLUMNS`] lists
+/// them, with each text column cut to the characters the read keeps.
+///
+/// A library file is a file another person can hand over, and a text value in
+/// one has no length of its own: a title of eight megabytes is a title SQLite
+/// stores. SQLite does the cutting, so a value of that size never crosses
+/// into this crate, and `substr` over text counts characters rather than
+/// bytes, so the cut falls on a character boundary and a value of
+/// several-byte characters comes back as whole characters.
+///
+/// A value that is neither text nor a blob is left as it is. SQLite would
+/// otherwise read a number as the text of its digits, and a row holding a
+/// number where text belongs is a row this crate reports as damaged rather
+/// than one it reads.
+fn read_columns() -> String {
+    let read: Vec<String> = COLUMNS
+        .iter()
+        .map(|(name, longest)| match longest {
+            Some(longest) => format!(
+                "CASE WHEN typeof({name}) IN ('text', 'blob') \
+                 THEN substr({name}, 1, {longest}) ELSE {name} END"
+            ),
+            None => (*name).to_owned(),
+        })
+        .collect();
+    read.join(", ")
+}
 
 /// How long one opener waits for another to finish writing before it gives
 /// up.
@@ -390,9 +486,10 @@ impl Index {
         self.connection
             .execute(
                 &format!(
-                    "INSERT OR REPLACE INTO tracks ({COLUMNS}) VALUES \
+                    "INSERT OR REPLACE INTO tracks ({}) VALUES \
                      (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
-                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)"
+                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
+                    written_columns()
                 ),
                 rusqlite::params![
                     record.hash.to_string(),
@@ -438,7 +535,7 @@ impl Index {
     /// is [`IndexError::Record`] naming the file the row holds.
     pub fn get(&self, hash: ContentHash) -> Result<Option<TrackRecord>, IndexError> {
         self.one(
-            &format!("SELECT {COLUMNS} FROM tracks WHERE hash = ?1"),
+            &format!("SELECT {} FROM tracks WHERE hash = ?1", read_columns()),
             [hash.to_string()],
         )
     }
@@ -449,7 +546,7 @@ impl Index {
     /// [`Index::get`].
     pub fn get_by_path(&self, path: &Path) -> Result<Option<TrackRecord>, IndexError> {
         self.one(
-            &format!("SELECT {COLUMNS} FROM tracks WHERE path = ?1"),
+            &format!("SELECT {} FROM tracks WHERE path = ?1", read_columns()),
             [path_text(path)],
         )
     }
@@ -573,11 +670,12 @@ impl Index {
                 Value::Real(bound),
             );
         }
+        let read = read_columns();
         let sql = if conditions.is_empty() {
-            format!("SELECT {COLUMNS} FROM tracks")
+            format!("SELECT {read} FROM tracks")
         } else {
             format!(
-                "SELECT {COLUMNS} FROM tracks WHERE {}",
+                "SELECT {read} FROM tracks WHERE {}",
                 conditions.join(" AND ")
             )
         };
@@ -802,19 +900,25 @@ fn refused(record: &TrackRecord) -> Option<String> {
 }
 
 /// The file a row names, for an error about that row. A row whose path is not
-/// text is named by that text read as far as it can be, and a row with no path
-/// at all is named by the hash that identifies the track.
+/// text is named by that text read as far as it can be, and a row whose path
+/// is longer than [`LONGEST_PATH`] is named by the hash that identifies the
+/// track, as is a row with no path at all. The read cuts a path that long, and
+/// a cut path names another file, so the hash names the row instead.
 fn path_of(row: &Row<'_>) -> PathBuf {
-    if let Ok(text) = row.get::<_, String>(1) {
-        return PathBuf::from(text);
+    let text = row.get::<_, String>(1).ok().or_else(|| {
+        row.get::<_, Vec<u8>>(1)
+            .ok()
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+    });
+    match text {
+        Some(text) if text.chars().count() <= LONGEST_PATH => PathBuf::from(text),
+        _ => {
+            let hash = row
+                .get::<_, String>(0)
+                .unwrap_or_else(|_| "an unnamed track".to_owned());
+            PathBuf::from(hash)
+        }
     }
-    if let Ok(bytes) = row.get::<_, Vec<u8>>(1) {
-        return PathBuf::from(String::from_utf8_lossy(&bytes).into_owned());
-    }
-    let hash = row
-        .get::<_, String>(0)
-        .unwrap_or_else(|_| "an unnamed track".to_owned());
-    PathBuf::from(hash)
 }
 
 /// Whether a record meets the conditions that SQLite was not asked about.
@@ -958,7 +1062,23 @@ fn release_data_source_text(source: ReleaseDataSource) -> &'static str {
 struct Unreadable(String);
 
 /// One row of `tracks` as a record.
+///
+/// Every text value comes from SQLite cut to the characters [`read_columns`]
+/// keeps of its column, so a record read from a library file another person
+/// wrote holds no more text than a record a scan stores. The path is the one
+/// exception, since a cut path names another file: a path longer than
+/// [`LONGEST_PATH`] is a row this call refuses instead.
 fn read_record(row: &Row<'_>) -> rusqlite::Result<TrackRecord> {
+    let path: String = row.get(1)?;
+    if path.chars().count() > LONGEST_PATH {
+        return Err(rusqlite::Error::FromSqlConversionFailure(
+            1,
+            Type::Text,
+            Box::new(Unreadable(format!(
+                "a path of more than {LONGEST_PATH} characters"
+            ))),
+        ));
+    }
     let key = match row.get::<_, Option<String>>(7)? {
         Some(_) => Some(KeyRecord {
             key: parsed(row, 7)?,
@@ -981,7 +1101,7 @@ fn read_record(row: &Row<'_>) -> rusqlite::Result<TrackRecord> {
     };
     Ok(TrackRecord {
         hash: parsed(row, 0)?,
-        path: PathBuf::from(row.get::<_, String>(1)?),
+        path: PathBuf::from(path),
         length: Samples(row.get(2)?),
         grid: BeatGrid {
             first_beat: Samples(row.get(3)?),
