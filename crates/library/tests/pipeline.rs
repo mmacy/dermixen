@@ -552,3 +552,50 @@ fn a_file_that_panics_the_analysis_fails_alone_and_the_scan_goes_on() {
     }
     assert_eq!(index.len().unwrap(), 2);
 }
+
+#[test]
+#[ignore = "library-hardening-scan"]
+fn a_scan_replaces_a_row_it_cannot_read_and_goes_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("music");
+    kicks_file(&root, "01 Etnica - Alien Protein.wav", 130.0);
+    let damaged = kicks_file(&root, "02 Prana - Scarab.wav", 140.0);
+    let library = dir.path().join("library.sqlite");
+    let beats = beats_at_130();
+    let analyzers = Analyzers {
+        beats: &beats,
+        key: None,
+        anchors: &EdgeAnchors,
+        phrases: &CountedPhrases,
+    };
+    let options = ScanOptions::default();
+    let mut index = Index::open(&library).unwrap();
+    let first = scan_into(&mut index, &root, &options, &analyzers, &mut |_| true).unwrap();
+    assert_eq!(first.added, 2);
+    drop(index);
+
+    // A row damaged from outside, and a file that arrives after it in the scan's order.
+    let connection = rusqlite::Connection::open(&library).unwrap();
+    let changed = connection
+        .execute(
+            "UPDATE tracks SET bpm = 'fast' WHERE path = ?1",
+            [damaged.to_str().unwrap()],
+        )
+        .unwrap();
+    assert_eq!(changed, 1);
+    drop(connection);
+    let later = kicks_file(&root, "03 Slinky Wizard - Lunar Juice.wav", 135.0);
+
+    let mut index = Index::open(&library).unwrap();
+    let second = scan_into(&mut index, &root, &options, &analyzers, &mut |_| true).unwrap();
+    assert_eq!(
+        second.failed,
+        [],
+        "the damaged row is not a failure of the file"
+    );
+    assert_eq!((second.added, second.unchanged), (2, 1), "{second:?}");
+    let (records, skipped) = index.query_with_skipped(&Default::default()).unwrap();
+    assert_eq!((records.len(), skipped), (3, 0));
+    assert!(index.get_by_path(&damaged).unwrap().is_some());
+    assert!(index.get_by_path(&later).unwrap().is_some());
+}

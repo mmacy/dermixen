@@ -804,3 +804,23 @@ fn a_new_library_file_is_for_its_owner_alone() {
     drop(Index::open(&path).unwrap());
     assert_eq!(mode(&path), 0o644);
 }
+
+#[cfg(unix)]
+#[test]
+#[ignore = "library-hardening-scan"]
+fn a_new_library_file_reached_through_a_link_is_for_its_owner_alone() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("target.sqlite");
+    let link = dir.path().join("library.sqlite");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    drop(Index::open(&link).unwrap());
+    let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+}
