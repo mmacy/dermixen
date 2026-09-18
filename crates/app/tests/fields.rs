@@ -156,3 +156,23 @@ fn a_refused_text_is_reported_without_the_spaces_around_it() {
     field.edit(" 130 bpm ");
     assert_eq!(field.finish(), Finish::Refused("130 bpm".to_owned()));
 }
+
+#[test]
+fn a_typed_tempo_outside_the_range_of_a_document_is_refused() {
+    for (typed, written) in [
+        ("19.9", None),
+        ("20", Some(20.0)),
+        ("999", Some(999.0)),
+        ("999.5", None),
+        ("1e12", None),
+        ("1e-300", None),
+    ] {
+        let mut field: TempoField<()> = TempoField::new(Bpm(128.0), 1);
+        field.begin(());
+        field.edit(typed);
+        match written {
+            Some(bpm) => assert_eq!(field.finish(), Finish::Written((), Bpm(bpm)), "{typed}"),
+            None => assert_eq!(field.finish(), Finish::Refused(typed.to_owned()), "{typed}"),
+        }
+    }
+}

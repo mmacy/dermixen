@@ -169,3 +169,52 @@ fn a_newer_request_replaces_the_intent_that_was_waiting() {
     assert_eq!(document.pending(), Some(&open));
     assert_eq!(document.answered(Answer::Discard), Next::Proceed(open));
 }
+
+/// Runs `work` on a thread and panics when it has not answered in two
+/// seconds, so that a read without end fails the test instead of hanging it.
+#[cfg(unix)]
+fn within_two_seconds<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || sender.send(work()));
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .expect("the call did not return within two seconds")
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "window-hardening"]
+fn a_document_that_is_a_device_or_too_large_is_refused_at_once() {
+    use dermixen_app::read_the_mix;
+    let dir = tempfile::tempdir().unwrap();
+    let zero = dir.path().join("zero.dmx");
+    std::os::unix::fs::symlink("/dev/zero", &zero).unwrap();
+    let said = within_two_seconds(move || read_the_mix(&zero)).unwrap_err();
+    assert!(said.contains("zero.dmx"), "{said}");
+
+    let large = dir.path().join("large.dmx");
+    let mut text = String::from("{\"version\": 1, \"tracks\": [");
+    text.push_str(&" ".repeat(16 * 1024 * 1024));
+    text.push_str("]}");
+    std::fs::write(&large, text).unwrap();
+    let said = read_the_mix(&large).unwrap_err();
+    assert!(said.contains("16777216"), "{said}");
+
+    let good =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/mix/valid/two-tracks.dmx");
+    assert_eq!(read_the_mix(&good).unwrap().tracks.len(), 2);
+}
+
+#[test]
+#[ignore = "window-hardening"]
+fn of_the_documents_one_event_names_only_the_last_is_opened() {
+    use dermixen_app::newest_document;
+    let paths: Vec<PathBuf> = (0..1_000)
+        .map(|n| PathBuf::from(format!("/mixes/{n}.dmx")))
+        .collect();
+    assert_eq!(
+        newest_document(paths),
+        Some(PathBuf::from("/mixes/999.dmx"))
+    );
+    assert_eq!(newest_document(Vec::new()), None);
+}

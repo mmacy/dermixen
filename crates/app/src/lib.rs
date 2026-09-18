@@ -23,7 +23,9 @@ pub use autosave::{
     write_atomically,
 };
 pub use corrections::write_correction;
-pub use document::{Answer, Document, EDITED, Intent, Next, Step, UNTITLED};
+pub use document::{
+    Answer, Document, EDITED, Intent, Next, Step, UNTITLED, newest_document, read_the_mix,
+};
 pub use fields::{Finish, TempoField, parse_buffer_frames};
 pub use grid::{
     DRAG_PX, GridBeat, GridColumn, GridEditor, GridScene, GridView, HIGHEST_BPM, LOWEST_BPM,

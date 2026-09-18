@@ -21,7 +21,7 @@ use dermixen_app::{
     LibraryPanel, LibraryRow, MAX_LANE_PX, MIN_LANE_PX, Next, Offer, Playback, Point, Report, Scan,
     Selection, Sort, Step, TAPS_FOR_A_TEMPO, TempoField, Timeline, TransportOrder, View,
     WheelGesture, arrow_step, autosave, autosave_path, forget_file, offered, offered_untitled,
-    open_the_library, parse_buffer_frames, untitled_autosave_path, wheel_gesture,
+    open_the_library, parse_buffer_frames, read_the_mix, untitled_autosave_path, wheel_gesture,
 };
 use dermixen_core::{
     BeatGrid, Beats, Bpm, ContentHash, Curve, Edit, Mix, Preset, Samples, Seconds, Settings,
@@ -460,19 +460,6 @@ const PATH_FIELD_PX: f32 = 360.0;
 /// keep it, and an untitled mix is then not protected.
 fn untitled_autosave_file() -> Option<PathBuf> {
     Some(untitled_autosave_path(&dirs::data_dir()?))
-}
-
-/// The mix in the file at `path`, or why the file is not one.
-///
-/// The window reads a mix the same way when it opens and when **Open**
-/// brings another mix under a window that is already open, so a file that
-/// cannot be read says the same thing in the status line as on the command
-/// line.
-fn read_the_mix(path: &Path) -> Result<Mix, String> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|problem| format!("cannot read {}: {problem}", path.display()))?;
-    Mix::from_json(&text)
-        .map_err(|problem| format!("{} is not a mix document: {problem}", path.display()))
 }
 
 /// What the autosave file of `document` contains, given `mix`, the document
