@@ -2,6 +2,7 @@ site_name: Dermixen
 site_description: >-
   A studio mix-authoring app: drag tracks onto a timeline, get automatic
   beatmatched transitions, edit them, and render one continuous mix.
+site_url: https://mmacy.github.io/dermixen/
 repo_url: https://github.com/mmacy/dermixen
 repo_name: mmacy/dermixen
 

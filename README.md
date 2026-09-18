@@ -57,7 +57,7 @@ The scan analyzes each track once, at about three seconds per track, and writes 
 
 ## Documentation
 
-The documentation is in `docs/`, arranged by what you're trying to do. [The documentation home page](docs/README.md) lists every page.
+The documentation is in `docs/`, arranged by what you're trying to do, and published at [mmacy.github.io/dermixen](https://mmacy.github.io/dermixen/). [The documentation home page](docs/README.md) lists every page.
 
 - Tutorials, to learn by doing: [Your first mix](docs/tutorials/your-first-mix.md) and [Editing a mix in the window](docs/tutorials/editing-a-mix-in-the-window.md).
 - How-to guides, one task each: scanning your music, finding tracks, building a mix from a tracklisting, checking and changing a transition, fixing a beat grid, leveling the tracks, relinking moved files, driving the app from a script, and building from source. They're listed on [the documentation home page](docs/README.md#how-to-guides).
