@@ -260,6 +260,28 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "wrapper-limits"]
+    fn a_sample_rate_aubio_would_loop_on_gives_no_tracker_at_once() {
+        // aubio rounds the ratio of the rate to the hop up to a power of two
+        // in a 32-bit number, and loops without end once that number wraps.
+        let started = std::time::Instant::now();
+        for (window, hop, rate) in [
+            (1024, 1, 2_000_000_000),
+            (1024, 512, 384_001),
+            (1024, 512, 4_294_967_295),
+            (1024, 512, 7_999),
+        ] {
+            assert!(
+                Tempo::new(window, hop, rate).is_none(),
+                "{window} {hop} {rate}"
+            );
+        }
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        assert!(Tempo::new(1024, 512, 8_000).is_some());
+        assert!(Tempo::new(1024, 512, 384_000).is_some());
+    }
+
+    #[test]
     fn impossible_settings_give_no_tracker() {
         assert!(Tempo::new(512, 1024, 44_100).is_none());
         assert!(Tempo::new(1024, 512, 0).is_none());

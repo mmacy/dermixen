@@ -112,6 +112,12 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// The lowest sample rate [`key_of_audio`] accepts, in samples per second.
+pub const LOWEST_SAMPLE_RATE: u32 = 8_000;
+
+/// The highest sample rate [`key_of_audio`] accepts, in samples per second.
+pub const HIGHEST_SAMPLE_RATE: u32 = 384_000;
+
 /// How many samples at `sample_rate` fill one of the frames libkeyfinder works
 /// a spectrum out from. At the rate Dermixen works at this is a little under
 /// four seconds of audio.
@@ -122,6 +128,9 @@ impl std::error::Error for Error {}
 /// that would rather refuse such a fragment than believe the answer should
 /// compare the length of its audio against this figure first, which is what
 /// Dermixen's own key analyzer does.
+///
+/// The answer is zero for a rate outside [`LOWEST_SAMPLE_RATE`] to
+/// [`HIGHEST_SAMPLE_RATE`], which [`key_of_audio`] refuses.
 pub fn frame_samples(sample_rate: u32) -> usize {
     // Safety: this only reads two constants out of the C++ library and does
     // arithmetic on them, touching no memory the caller owns.
@@ -158,7 +167,11 @@ pub fn frame_samples(sample_rate: u32) -> usize {
 /// key from, and [`Error::Failed`] when libkeyfinder reported a failure, which
 /// includes a track longer than the roughly twenty-seven hours libkeyfinder's
 /// own sample counter reaches and a track holding a sample that is not a
-/// finite number.
+/// finite number. A sample rate outside [`LOWEST_SAMPLE_RATE`] to
+/// [`HIGHEST_SAMPLE_RATE`] is also [`Error::Failed`], with a reason that
+/// names the sample rate, and it never reaches libkeyfinder, which divides by
+/// a figure it works out from the rate and reads outside its buffers when the
+/// rate is very large.
 pub fn key_of_audio(samples: &[f32], sample_rate: u32) -> Result<Analysis, Error> {
     // libkeyfinder builds its tone profiles the first time an analysis asks
     // for them, without guarding that first build against a second thread
@@ -377,6 +390,37 @@ mod tests {
             panic!("libkeyfinder accepted a sample that is not a number");
         };
         assert!(!reason.is_empty(), "the failure came back with no reason");
+    }
+
+    #[test]
+    #[ignore = "wrapper-limits"]
+    fn a_sample_rate_libkeyfinder_cannot_work_at_is_refused() {
+        let second = vec![0.25_f32; 44_100];
+        for rate in [
+            0,
+            1,
+            1_000,
+            4_000,
+            7_999,
+            384_001,
+            2_147_483_647,
+            4_294_967_295,
+        ] {
+            match key_of_audio(&second, rate) {
+                Err(Error::Failed(reason)) => {
+                    assert!(reason.contains("sample rate"), "{rate}: {reason}")
+                }
+                other => panic!("{rate}: {other:?}"),
+            }
+            assert_eq!(frame_samples(rate), 0, "{rate}");
+        }
+        for rate in [LOWEST_SAMPLE_RATE, HIGHEST_SAMPLE_RATE] {
+            assert!(frame_samples(rate) > 0, "{rate}");
+            assert!(
+                !matches!(key_of_audio(&second, rate), Err(Error::Failed(_))),
+                "{rate} was refused"
+            );
+        }
     }
 
     #[test]

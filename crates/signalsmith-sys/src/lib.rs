@@ -52,6 +52,15 @@ pub struct Stretch {
     channels: usize,
 }
 
+/// The lowest sample rate [`Stretch::new`] accepts, in samples per second.
+pub const LOWEST_SAMPLE_RATE: f32 = 8_000.0;
+
+/// The highest sample rate [`Stretch::new`] accepts, in samples per second.
+pub const HIGHEST_SAMPLE_RATE: f32 = 384_000.0;
+
+/// The most channels [`Stretch::new`] accepts.
+pub const MOST_CHANNELS: usize = 8;
+
 impl Stretch {
     /// Builds a stretcher for `channels` channels of audio at `sample_rate`
     /// samples per second.
@@ -60,11 +69,17 @@ impl Stretch {
     /// for a stretch large enough that it spreads the bins apart at random, so
     /// that rendering the same mix twice gives the same audio both times.
     ///
+    /// Returns `None` for a channel count of zero or above [`MOST_CHANNELS`],
+    /// and for a sample rate that is not a number from [`LOWEST_SAMPLE_RATE`]
+    /// to [`HIGHEST_SAMPLE_RATE`]. The library sizes its buffers from the
+    /// rate without checking it, so a rate outside that range must never
+    /// reach the library.
+    ///
     /// # Panics
     ///
     /// Panics if `channels` is zero, if `channels` or `seed` is too large for
     /// the C types they are passed as, or if the C++ side returns nothing.
-    pub fn new(channels: usize, sample_rate: f32, seed: i64) -> Self {
+    pub fn new(channels: usize, sample_rate: f32, seed: i64) -> Option<Self> {
         assert!(channels > 0, "a stretcher is built for one channel or more");
         let count = c_int::try_from(channels).expect("the channel count fits in a C int");
         let seed = c_long::try_from(seed).expect("the seed fits in a C long");
@@ -76,10 +91,10 @@ impl Stretch {
             !stretcher.is_null(),
             "the C++ side did not return a stretcher"
         );
-        Self {
+        Some(Self {
             stretcher,
             channels,
-        }
+        })
     }
 
     /// The number of channels this stretcher was built for.
@@ -206,7 +221,7 @@ mod tests {
 
     #[test]
     fn a_stretcher_reports_the_size_it_was_built_at() {
-        let stretch = Stretch::new(2, RATE, SEED);
+        let stretch = Stretch::new(2, RATE, SEED).unwrap();
         assert_eq!(stretch.channels(), 2);
         // The library's default preset uses a window of about a tenth of a
         // second, so both latencies are a few thousand frames.
@@ -218,7 +233,7 @@ mod tests {
 
     #[test]
     fn stretched_audio_comes_out_and_is_not_silence() {
-        let mut stretch = Stretch::new(2, RATE, SEED);
+        let mut stretch = Stretch::new(2, RATE, SEED).unwrap();
         let input = tone(44_100, 440.0);
         let produced = run(&mut stretch, &input, 1044);
         let loudest = produced.iter().fold(0.0f32, |peak, s| peak.max(s.abs()));
@@ -227,11 +242,47 @@ mod tests {
 
     #[test]
     fn resetting_gives_the_same_output_again() {
-        let mut stretch = Stretch::new(2, RATE, SEED);
+        let mut stretch = Stretch::new(2, RATE, SEED).unwrap();
         let input = tone(22_050, 330.0);
         let first = run(&mut stretch, &input, 1044);
         stretch.reset();
         let again = run(&mut stretch, &input, 1044);
         assert_eq!(first, again);
+    }
+
+    #[test]
+    #[ignore = "wrapper-limits"]
+    fn a_sample_rate_the_library_cannot_size_its_buffers_from_is_refused() {
+        for rate in [
+            0.0,
+            -44_100.0,
+            f32::NAN,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            1.0,
+            7_999.0,
+            384_001.0,
+            1e12,
+        ] {
+            assert!(Stretch::new(2, rate, SEED).is_none(), "{rate} was accepted");
+        }
+        for rate in [LOWEST_SAMPLE_RATE, 44_100.0, HIGHEST_SAMPLE_RATE] {
+            assert!(Stretch::new(2, rate, SEED).is_some(), "{rate} was refused");
+        }
+    }
+
+    #[test]
+    #[ignore = "wrapper-limits"]
+    fn a_channel_count_outside_the_limit_is_refused_and_nothing_aborts() {
+        for channels in [0, MOST_CHANNELS + 1, 1_000_000, usize::MAX] {
+            assert!(
+                Stretch::new(channels, RATE, SEED).is_none(),
+                "{channels} channels were accepted"
+            );
+        }
+        assert_eq!(
+            Stretch::new(MOST_CHANNELS, RATE, SEED).unwrap().channels(),
+            MOST_CHANNELS
+        );
     }
 }

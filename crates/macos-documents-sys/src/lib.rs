@@ -68,7 +68,7 @@ mod apple_events {
     use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
     use objc2_app_kit::NSApplicationWillFinishLaunchingNotification;
     use objc2_foundation::{
-        NSAppleEventDescriptor, NSAppleEventManager, NSNotification, NSNotificationCenter,
+        NSAppleEventDescriptor, NSAppleEventManager, NSNotification, NSNotificationCenter, NSURL,
     };
 
     /// An Apple event is named by four characters, which the Objective-C
@@ -194,6 +194,13 @@ mod apple_events {
     /// the URL names no path.
     fn path_of(file: &NSAppleEventDescriptor) -> Option<PathBuf> {
         let url = file.fileURLValue()?;
+        path_of_url(&url)
+    }
+
+    /// The path a file URL names, or nothing for a URL of any other scheme.
+    /// The path of `https://example.com/x.dmx` is `/x.dmx`, which names a
+    /// file nobody asked the app to open.
+    pub(crate) fn path_of_url(url: &NSURL) -> Option<PathBuf> {
         let path = url.path()?;
         Some(PathBuf::from(path.to_string()))
     }
@@ -260,5 +267,32 @@ mod apple_events {
         // the block, and the handler the block holds, until a call to
         // `removeObserver:`, so the token here is of no further use.
         drop(observer);
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::path::PathBuf;
+
+        use objc2_foundation::{NSString, NSURL};
+
+        use super::path_of_url;
+
+        #[test]
+        fn a_file_url_names_its_path() {
+            let url = NSURL::fileURLWithPath(&NSString::from_str("/Users/dermixenuser/set.dmx"));
+            assert_eq!(
+                path_of_url(&url),
+                Some(PathBuf::from("/Users/dermixenuser/set.dmx"))
+            );
+        }
+
+        #[test]
+        #[ignore = "wrapper-limits"]
+        fn a_url_of_another_scheme_names_no_path() {
+            for text in ["https://example.com/x.dmx", "ftp://example.com/etc/passwd"] {
+                let url = NSURL::URLWithString(&NSString::from_str(text)).unwrap();
+                assert_eq!(path_of_url(&url), None, "{text}");
+            }
+        }
     }
 }
