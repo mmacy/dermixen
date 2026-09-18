@@ -30,7 +30,9 @@ Version 1 is the format `dermixen` reads and writes.
 }
 ```
 
-Every field shown is required except `gain_db`, which may be omitted and then means zero. A field that is not listed here is an error, so that a misspelt name is caught rather than ignored.
+Every field shown is required except `gain_db`, which may be omitted and then means zero. A field that is not listed here is an error, so that a misspelt name is caught rather than ignored. A key may appear once in an object: a file that gives one key twice is refused rather than read with one of the two values.
+
+Every number has a stated range, given with its field below. No real mix reaches one of these limits. `dermixen` holds every number in a file to its range before it accepts the file, so a file `dermixen` accepts lays out, renders, and can be written back.
 
 The file contains what a render needs and nothing else. Tags and musical key belong to [the library](library.md), where the app looks them up by `hash`.
 
@@ -39,35 +41,35 @@ The file contains what a render needs and nothing else. Tags and musical key bel
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `version` | integer | The format version. The current version is `1`, and a file of any other version is refused. |
-| `tracks` | list | The playlist, in order. The playlist is also the timeline: the order of this list is the order of the mix. It may be empty. |
+| `tracks` | list | The playlist, in order. The playlist is also the timeline: the order of this list is the order of the mix. It may be empty. The tracks together must lay out as a mix of at most 24 hours, measured from the first sample heard to the last. |
 
 ## A track
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `path` | string | Where the audio file was last seen. |
+| `path` | string | Where the audio file was last seen. It must not contain a NUL character, since no file system call accepts one. |
 | `hash` | string | The BLAKE3 hash of the audio file's bytes, as 64 hexadecimal digits. Dermixen writes lowercase and reads either case. The hash identifies the file when it has moved, so `path` is a hint and `hash` is the identity. |
-| `length_samples` | integer | The length of the audio in samples at 44.1 kHz. Zero or more. |
+| `length_samples` | integer | The length of the audio in samples at 44.1 kHz. It must not be negative, and it must be at most 238140000 samples, which is ninety minutes. |
 | `grid` | object | The track's beat grid. See below. |
 | `anchors` | object | Where the track joins its neighboring tracks. See below. |
 | `keylock` | boolean | `true` keeps the track's pitch when its speed changes. `false` lets the pitch move with the speed, as a record does. |
-| `gain_db` | number | A gain in decibels applied to the whole track on top of its volume envelope, which is how volume leveling brings every track to one loudness. See "The gain" below. May be omitted, which means `0.0`. Dermixen always writes it. |
+| `gain_db` | number | A gain in decibels applied to the whole track on top of its volume envelope, which is how volume leveling brings every track to one loudness. A level from -144 to 24 decibels. See "The gain" below. May be omitted, which means `0.0`. Dermixen always writes it. |
 | `volume` | envelope | The volume envelope. See below. |
 | `eq` | object | Three envelopes, `low`, `mid`, and `high`, one per EQ band. |
 | `tempo` | list | This track's nodes on the mix tempo curve. See below. |
 
 ### Positions and units
 
-Positions within a track are either samples from the first sample of the audio file or beats of the track's own grid. Which unit a field uses is part of its name: `first_beat_sample` and `length_samples` are samples, and `intro_beat`, `outro_beat`, and every `beat` field are beats. Beats may be fractional except where this page says they must be whole. Beat zero is the first beat of the grid, and beats before it are negative.
+Positions within a track are either samples from the first sample of the audio file or beats of the track's own grid. Which unit a field uses is part of its name: `first_beat_sample` and `length_samples` are samples, and `intro_beat`, `outro_beat`, and every `beat` field are beats. Beats may be fractional except where this page says they must be whole. Beat zero is the first beat of the grid, and beats before it are negative. Every beat in a file, whether an anchor, a tempo node's position, or an envelope node's position, is from -10000000 to 10000000. Whole beats of that size add without rounding, which is what keeps the layout exact: a mix would need more than four hundred million tracks before the layout's running sum of anchors lost a beat.
 
-Levels are in decibels, where `0.0` leaves the signal unchanged. Any level at or below `-90.0` is silence: the engine contributes nothing from a track at that level, rather than an inaudible residue.
+Levels are in decibels, where `0.0` leaves the signal unchanged. Every level, whether a `gain_db` or an envelope node's `db`, is from -144 to 24 decibels. Any level at or below `-90.0` is silence: the engine contributes nothing from a track at that level, rather than an inaudible residue.
 
 ### The grid
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `first_beat_sample` | integer | The position of beat zero, in samples. Beat zero is treated as the start of a bar. |
-| `bpm` | number | The track's original tempo, which analysis finds once and which never changes. Must be a positive finite number. Every track has one constant tempo. |
+| `first_beat_sample` | integer | The position of beat zero, in samples. Beat zero is treated as the start of a bar. It sits within 238140000 samples of the track's first sample in either direction, which is ninety minutes. |
+| `bpm` | number | The track's original tempo, which analysis finds once and which never changes. From 20 to 999 beats per minute, which is the range the grid editor accepts. Every track has one constant tempo. |
 
 The engine stretches a track by the ratio between the mix tempo curve and this `bpm`. The playlist shows both numbers.
 
@@ -75,8 +77,8 @@ The engine stretches a track by the ratio between the mix tempo curve and this `
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `intro_beat` | number | The beat that the previous track's outro anchor lines up with. Must be a whole beat. |
-| `outro_beat` | number | The beat that the next track's intro anchor lines up with. Must be a whole beat. |
+| `intro_beat` | number | The beat that the previous track's outro anchor lines up with. Must be a whole beat from -10000000 to 10000000. |
+| `outro_beat` | number | The beat that the next track's intro anchor lines up with. Must be a whole beat from -10000000 to 10000000. |
 
 The first track's beat zero is at mix beat zero. Every later track is placed so that its `intro_beat` falls on the same mix beat as the previous track's `outro_beat`. That single alignment is what places every track, and the overlap between two tracks follows from it: a track plays in full, so the audio before its intro anchor is heard under the previous track and the audio after its outro anchor is heard under the next one. What is actually audible is up to the envelopes. Moving the intro anchor later, or the outro anchor earlier, lengthens the overlap.
 
@@ -88,17 +90,17 @@ The anchors in the file belong to this mix. The library keeps the positions anal
 
 `gain_db` is added to the volume envelope's level at every moment of the track, so a track with an empty envelope and a gain of `-2.5` plays 2.5 decibels below its file throughout, and a fade still reaches silence where the envelope reaches it. Whether the track is silent depends on the envelope alone, and a level at or below `-90.0` in the envelope contributes nothing whatever the gain.
 
-Volume leveling writes the gain when a track joins a mix, from the loudness the library measured for the file. The rule is the smaller of two differences: minus fourteen LUFS minus the track's integrated loudness, which brings the track to the target, and minus one dBTP minus the track's true peak, which keeps a quiet track with sharp peaks from being raised into clipping. A loud track is therefore turned down by exactly what brings it to minus fourteen, and a quiet one is turned up by that much or by as much as its peaks allow, whichever is less. A file whose record has no loudness gets a gain of zero. `dermixen mix add --gain` writes a given number instead, and the field can be edited by hand like any other. The mix tempo and the envelopes are unaffected either way.
+Volume leveling writes the gain when a track joins a mix, from the loudness the library measured for the file. The rule is the smaller of two differences: minus fourteen LUFS minus the track's integrated loudness, which brings the track to the target, and minus one dBTP minus the track's true peak, which keeps a quiet track with sharp peaks from being raised into clipping. A loud track is therefore turned down by exactly what brings it to minus fourteen, and a quiet one is turned up by that much or by as much as its peaks allow, whichever is less. The result stops at `-144.0` or `24.0` if the two differences reach past the range a level may take. A file whose record has no loudness gets a gain of zero, and so does a file whose measurement is not a finite number. `dermixen mix add --gain` writes a given number instead, and the field can be edited by hand like any other. The mix tempo and the envelopes are unaffected either way.
 
 ### Envelopes
 
-An envelope is a list of nodes, in any order, each with a `beat` and a `db`. Between two nodes the level changes in a straight line in decibels. Before the first node the level is the first node's level, and after the last node it is the last node's level. An empty list means the level is `0.0` throughout. Two nodes at the same beat are an error.
+An envelope is a list of nodes, in any order, each with a `beat` from -10000000 to 10000000 and a `db` from -144 to 24 decibels. Between two nodes the level changes in a straight line in decibels. Before the first node the level is the first node's level, and after the last node it is the last node's level. An empty list means the level is `0.0` throughout. Two nodes at the same beat are an error.
 
 ### Tempo nodes
 
 The mix has one tempo curve, and every track plays at whatever tempo the curve gives at each moment, so overlapping tracks cannot drift apart. The curve is built from the `tempo` lists of all the tracks: each node's `beat` is a beat of its own track, and placing the track on the timeline places the node. Nodes therefore travel with a track when the playlist is reordered.
 
-Each node is `{ "beat": number, "bpm": number }`, and `bpm` must be a positive finite number. A node's `beat` need not lie within its track. The node lands wherever the arithmetic below puts it.
+Each node is `{ "beat": number, "bpm": number }`, with `beat` from -10000000 to 10000000 and `bpm` from 20 to 999 beats per minute, the same range a grid's tempo has. A node's `beat` need not lie within its track. The node lands wherever the arithmetic below puts it.
 
 The curve on the timeline is assembled like this:
 
@@ -150,4 +152,4 @@ The example file above was written by hand rather than by a preset, which is why
 
 ## Errors
 
-When a file is refused, the error names the field as a path into the document, then says what is wrong there, in the form `tracks[2].grid.bpm: must be a positive number`. A file that is not JSON at all has an empty field path. The fixtures under `tests/fixtures/mix/invalid/` show one example of each kind of refusal, and the sidecar `.expected.json` next to each one says what the error must name.
+When a file is refused, the error names the field as a path into the document, then says what is wrong there, in the form `tracks[2].grid.bpm: must be a tempo from 20 to 999 beats per minute, not 1000000000000.0`. A file that is not JSON at all has an empty field path, and a mix that lays out longer than 24 hours is named by the `tracks` field, since no single track is at fault. The fixtures under `tests/fixtures/mix/invalid/` and `tests/fixtures/mix/out-of-range/` show one example of each kind of refusal, and the sidecar `.expected.json` next to each one says what the error must name.

@@ -27,7 +27,10 @@ pub use edit::{
 pub use envelope::{Envelope, EnvelopeError, EnvelopeNode};
 pub use hash::{ContentHash, ContentHashParseError};
 pub use leveling::{TARGET_LOUDNESS, TRUE_PEAK_CEILING, leveling_gain};
-pub use mix::{EqEnvelopes, FORMAT_VERSION, Mix, MixFileError, Timeline, Track};
+pub use mix::{
+    EqEnvelopes, FORMAT_VERSION, LONGEST_MIX, LONGEST_TRACK, MAX_BEAT, Mix, MixFileError, Timeline,
+    Track,
+};
 pub use settings::{
     DEFAULT_GRID_STRIP_COLLAPSED, DEFAULT_LIBRARY_COLLAPSED, DEFAULT_LIBRARY_FILE,
     DEFAULT_LIBRARY_WORD_WRAP, DEFAULT_METRONOME, DEFAULT_MUSIC_FOLDER, SETTINGS_FILE,
