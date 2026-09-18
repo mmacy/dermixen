@@ -25,10 +25,10 @@ clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 dirs = "7"
+tempfile = "3"
 
 [dev-dependencies]
 dermixen-testkit.workspace = true
-tempfile = "3"
 hound = "3.5.1"
 jsonschema = "0.56"
 

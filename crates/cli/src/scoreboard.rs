@@ -708,6 +708,6 @@ pub fn run(dir: &Path, giantsteps: bool, json: bool) -> Result<(), String> {
     if let Some(phrases) = &phrases {
         tables.push(phrases.table());
     }
-    print!("{}", tables.join("\n"));
+    crate::text::block(&tables.join("\n"));
     Ok(())
 }

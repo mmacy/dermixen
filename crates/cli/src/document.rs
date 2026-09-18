@@ -12,6 +12,7 @@ use dermixen_core::{
 };
 use dermixen_library::TrackRecord;
 use dermixen_media::hash_file;
+use tempfile::NamedTempFile;
 
 use crate::analyze;
 use crate::analyzers::Given;
@@ -29,10 +30,40 @@ const PRESET_NAMES: &str = "blend, beatmix, bass-swap, and cut";
 /// in the document to the limits `DESIGN.md` states, so the mix this returns
 /// is one the layout and the render can take as it stands.
 pub fn read(mix: &Path) -> Result<Mix, String> {
+    read_with(mix, Refuse::AnythingButAFile)
+}
+
+/// Reads a mix document for `mix relink`, which is the one command that can
+/// repair a document whose track no longer names an audio file.
+///
+/// A track path that names a folder reads through here and is left for
+/// `mix relink` to deal with, which it does by looking the track's bytes up
+/// wherever they are now, exactly as it deals with a track whose file is
+/// gone. A path that names a device or a named pipe is refused here as it is
+/// everywhere else, because a file system produces neither on its own: such
+/// a path was written into the document by hand, and rewriting that document
+/// would hide it rather than report it.
+pub fn read_for_relink(mix: &Path) -> Result<Mix, String> {
+    read_with(mix, Refuse::ADeviceOrAPipe)
+}
+
+/// Which track paths a command refuses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Refuse {
+    /// Anything a command cannot read audio from, which is every path that
+    /// names something other than a regular file.
+    AnythingButAFile,
+    /// A path that names a device or a named pipe, leaving a folder to
+    /// `mix relink`.
+    ADeviceOrAPipe,
+}
+
+/// Reads a mix document and holds its track paths to `refuse`.
+fn read_with(mix: &Path, refuse: Refuse) -> Result<Mix, String> {
     let text = read_text(mix, LARGEST_DOCUMENT).map_err(|problem| problem.to_string())?;
     let document =
         Mix::from_json(&text).map_err(|problem| format!("{}: {problem}", mix.display()))?;
-    check_track_paths(mix, &document)?;
+    check_track_paths(mix, &document, refuse)?;
     Ok(document)
 }
 
@@ -41,15 +72,21 @@ pub fn read(mix: &Path) -> Result<Mix, String> {
 /// A track path with nothing at it is left alone, because a file that has
 /// moved or is on a volume that is not mounted is what `mix relink` is for.
 /// A path that names a folder, a device, or a named pipe is different: no
-/// command wrote it, reading one never gives audio, and reading a device
-/// never ends, so the document is refused as soon as it is read rather than
-/// at the moment some command reaches that path.
-fn check_track_paths(mix: &Path, document: &Mix) -> Result<(), String> {
+/// command wrote it, and reading one never gives audio. The document is
+/// therefore refused as soon as it is read rather than at the moment some
+/// command reaches that path, except that `mix relink` reads a document
+/// whose track names a folder so that it can repair the track.
+fn check_track_paths(mix: &Path, document: &Mix, refuse: Refuse) -> Result<(), String> {
     for (index, track) in document.tracks.iter().enumerate() {
         let Ok(data) = std::fs::metadata(&track.path) else {
             continue;
         };
-        if !data.file_type().is_file() {
+        let kind = data.file_type();
+        let refused = match refuse {
+            Refuse::AnythingButAFile => !kind.is_file(),
+            Refuse::ADeviceOrAPipe => !kind.is_file() && !kind.is_dir(),
+        };
+        if refused {
             return Err(format!(
                 "track {} of {} names {}, which is not a regular file. A track of a mix is an audio file.",
                 index + 1,
@@ -81,26 +118,32 @@ pub fn replace(mix: &Path, document: &Mix) -> Result<(), String> {
 }
 
 /// Carries out `mix new`, refusing to replace a document that is already there.
+///
+/// The whole document is written to a temporary file beside `mix` whose name
+/// nobody can work out in advance, and only then is the document's own name
+/// linked to that file, which fails when anything already has the name. The
+/// name therefore appears with the whole document behind it or not at all: a
+/// run that stops partway leaves no empty file and no half-written one where
+/// the person asked for a document.
 pub fn new(mix: &Path, json: bool) -> Result<(), String> {
     let text = Mix::new()
         .checked_json()
         .map_err(|problem| format!("cannot write {}: {problem}", mix.display()))?;
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(mix)
-        .map_err(|problem| {
-            if problem.kind() == std::io::ErrorKind::AlreadyExists {
-                format!(
-                    "{} exists, and dermixen will not replace a mix document that is already there",
-                    mix.display()
-                )
-            } else {
-                format!("cannot write {}: {problem}", mix.display())
-            }
-        })?;
-    file.write_all(text.as_bytes())
-        .map_err(|problem| format!("cannot write {}: {problem}", mix.display()))?;
+    let cannot_write =
+        |problem: std::io::Error| format!("cannot write {}: {problem}", mix.display());
+    let mut temporary = start_beside(mix).map_err(cannot_write)?;
+    temporary.write_all(text.as_bytes()).map_err(cannot_write)?;
+    temporary.as_file().sync_all().map_err(cannot_write)?;
+    temporary.persist_noclobber(mix).map_err(|problem| {
+        if problem.error.kind() == std::io::ErrorKind::AlreadyExists {
+            format!(
+                "{} exists, and dermixen will not replace a mix document that is already there",
+                mix.display()
+            )
+        } else {
+            cannot_write(problem.error)
+        }
+    })?;
 
     #[derive(serde::Serialize)]
     struct Written {
@@ -114,6 +157,29 @@ pub fn new(mix: &Path, json: bool) -> Result<(), String> {
         say!("wrote {}", mix.display());
     }
     Ok(())
+}
+
+/// Starts a temporary file in the folder `mix` is in, so that the file and
+/// the document's name can be linked to each other, which works only within
+/// one file system.
+///
+/// The name is unpredictable and the file is created only if nothing has
+/// that name, as the temporary file of an atomic write is, so a link
+/// somebody planted at a name this command might have chosen is never
+/// written through. A new file gets the permissions a new file gets from any
+/// other program, which the process's file creation mask decides.
+fn start_beside(mix: &Path) -> std::io::Result<NamedTempFile> {
+    let folder = match mix.parent() {
+        Some(folder) if !folder.as_os_str().is_empty() => folder,
+        _ => Path::new("."),
+    };
+    let mut builder = tempfile::Builder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(std::fs::Permissions::from_mode(0o666));
+    }
+    builder.tempfile_in(folder)
 }
 
 /// Reads an anchor that a person gave, refusing one that is not a whole beat

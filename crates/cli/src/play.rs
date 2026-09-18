@@ -72,8 +72,22 @@ struct CaptureOutput {
     /// The pulling thread, which hands the file back when it stops, or says
     /// what went wrong writing it.
     thread: Option<JoinHandle<Result<WavFile, String>>>,
-    /// What the pulling thread said, once it has stopped.
-    outcome: Option<Result<WavFile, String>>,
+    /// What became of the pulling thread, once it has stopped.
+    outcome: Option<Outcome>,
+}
+
+/// What became of the thread that pulled the feed into the capture file.
+enum Outcome {
+    /// The thread took every frame and handed the file back.
+    Wrote(WavFile),
+    /// The thread could not write the file, and this is why.
+    Failed(String),
+    /// The thread met a defect, and this is what it panicked with. The
+    /// thread that joined it raises the same panic again, so a defect on the
+    /// capture thread reaches the person as the one line and the exit code
+    /// `docs/cli.md` gives a defect, rather than as a second message and the
+    /// code that means the command refused something.
+    Defect(Box<dyn std::any::Any + Send>),
 }
 
 impl CaptureOutput {
@@ -89,12 +103,20 @@ impl CaptureOutput {
     /// Completes the captured file and moves `writing` onto `out`, so a
     /// capture that failed partway leaves nothing where the person asked for
     /// the file.
+    ///
+    /// # Panics
+    ///
+    /// Panics with the pulling thread's own panic when that thread met a
+    /// defect, which is how the defect reaches `main.rs`.
     fn finish(self, writing: AtomicFile, out: &Path) -> Result<(), String> {
         let file = match (self.outcome, self.file) {
             // The pulling thread ran and handed the file back.
-            (Some(Ok(file)), _) => file,
+            (Some(Outcome::Wrote(file)), _) => file,
             // It ran and could not write, so there is nothing to keep.
-            (Some(Err(problem)), _) => return Err(problem),
+            (Some(Outcome::Failed(problem)), _) => return Err(problem),
+            // It met a defect, which the hook has already reported, so the
+            // panic goes on from here rather than turning into a message.
+            (Some(Outcome::Defect(panic)), _) => std::panic::resume_unwind(panic),
             // The span held no frames, so the thread was never started and
             // the file is still here, empty.
             (None, Some(file)) => file,
@@ -165,8 +187,9 @@ impl Output for CaptureOutput {
     fn stop(&mut self) {
         if let Some(thread) = self.thread.take() {
             self.outcome = Some(match thread.join() {
-                Ok(outcome) => outcome,
-                Err(_) => Err("the capture stopped unexpectedly".to_owned()),
+                Ok(Ok(file)) => Outcome::Wrote(file),
+                Ok(Err(problem)) => Outcome::Failed(problem),
+                Err(panic) => Outcome::Defect(panic),
             });
         }
     }

@@ -59,6 +59,11 @@ struct TrackLine {
 /// settings file that cannot be read stops every command that opens the
 /// library.
 ///
+/// A track whose path names a folder is read through and looked for like a
+/// track whose file is gone, because a folder is what a person finds where a
+/// file was deleted or where a volume is not mounted, and this command is
+/// the repair for it. Every other command refuses such a document.
+///
 /// The library file is opened only when it is already there. A person who
 /// has never scanned their music, or who names a library file that has not
 /// been built yet, gets a search under the folders alone, and the command
@@ -71,7 +76,7 @@ pub fn run(
     json: bool,
 ) -> Result<(), String> {
     let settings = crate::settings::read()?;
-    let mut document = crate::document::read(mix)?;
+    let mut document = crate::document::read_for_relink(mix)?;
     let location = crate::index::location(library, &settings)?;
     let mut index = match location.exists() {
         true => Some(crate::index::open(&location)?),

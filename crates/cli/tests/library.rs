@@ -600,14 +600,16 @@ fn a_folder_the_command_makes_for_the_library_is_private() {
     let mode_of = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
 
     let made = dir.path().join("newfolder");
-    let library = made.join("library.sqlite");
+    let inside = made.join("inner");
+    let library = inside.join("library.sqlite");
     ok(&dermixen(
         dir.path(),
         &[("DERMIXEN_LIBRARY_FILE", library.to_str().unwrap())],
         &["library", "scan", "music"],
     ));
     assert!(library.exists());
-    assert_eq!(mode_of(&made), 0o700);
+    assert_eq!(mode_of(&made), 0o700, "the folder the command made");
+    assert_eq!(mode_of(&inside), 0o700, "the folder below it");
 
     // A folder that is already there keeps the permissions it has.
     let chosen = dir.path().join("chosen");
@@ -622,4 +624,46 @@ fn a_folder_the_command_makes_for_the_library_is_private() {
         &["library", "scan", "music"],
     ));
     assert_eq!(mode_of(&chosen), 0o755);
+}
+
+/// A reader that has read enough closes the pipe, and the command stops
+/// writing rather than reporting a defect. The listing is larger than the
+/// 64 KiB a pipe holds, so the command is still writing when the reader goes.
+#[test]
+#[cfg(unix)]
+fn a_reader_that_closes_the_pipe_is_not_a_failure() {
+    use std::process::{Command, Stdio};
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut index = Index::open(&dir.path().join("library.sqlite")).unwrap();
+    for number in 0..500u16 {
+        let name =
+            format!("{number:03} Etnica - A track with a name long enough to fill a pipe.wav");
+        let path = dir.path().join("music").join(&name);
+        index
+            .upsert(&dated((number % 251) as u8, &path, Some(1996), false))
+            .unwrap();
+    }
+    drop(index);
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_dermixen"))
+        .args(["library", "query"])
+        .current_dir(dir.path())
+        .env("DERMIXEN_LIBRARY_FILE", dir.path().join("library.sqlite"))
+        .env("DERMIXEN_SETTINGS_FILE", dir.path().join("settings.toml"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the dermixen binary runs");
+    // The reader closes at once, which is what `| head -c 10` does once it
+    // has its ten bytes.
+    drop(child.stdout.take().expect("standard output is a pipe"));
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(
+        output.stderr.is_empty(),
+        "the command said something about the closed pipe: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

@@ -393,7 +393,7 @@ fn main() -> ExitCode {
             None => "a place it cannot name".to_owned(),
         };
         note!(
-            "error: dermixen met a defect in itself at {place} and stopped: {}. Nothing this command had not already written has been written. Please report this.",
+            "error: dermixen met a defect in itself at {place} and stopped: {}. Whatever the command had finished writing is in place, and a file it was part way through writing was not replaced. Please report this.",
             defect_message(panic)
         );
     }));
