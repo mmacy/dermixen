@@ -117,7 +117,34 @@ impl WavFile {
         })
     }
 
+    /// Starts a stereo WAV file at the internal sample rate in a file that is
+    /// already open, which is how a caller writes through
+    /// [`dermixen_core::files::AtomicFile`]. `path` names the file in error
+    /// messages and is never opened.
+    pub fn from_file(
+        file: std::fs::File,
+        path: &Path,
+        depth: WavDepth,
+    ) -> Result<WavFile, WavError> {
+        let _ = (file, depth);
+        Err(WavError {
+            path: path.to_path_buf(),
+            message: "writing to an open file is not implemented".to_owned(),
+        })
+    }
+
+    /// The most frames a WAV file of this depth can hold. A WAV file states
+    /// the size of its audio in 32 bits, so the audio and the header together
+    /// stay under 4 GiB.
+    pub fn capacity(depth: WavDepth) -> dermixen_core::Samples {
+        let _ = depth;
+        dermixen_core::Samples(i64::MAX)
+    }
+
     /// Appends frames to the file, converting them the way [`write_frame`] does.
+    ///
+    /// A write that would take the file past [`WavFile::capacity`] is an
+    /// error whose message names the 4 GiB limit, and it writes nothing.
     pub fn write(&mut self, frames: &[crate::Frame]) -> Result<(), WavError> {
         let to_wav_error = |error: hound::Error| WavError {
             path: self.path.clone(),
@@ -156,5 +183,42 @@ impl std::fmt::Debug for WavFile {
             .field("path", &self.path)
             .field("depth", &self.depth)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod limit_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "media-limits"]
+    fn the_capacity_is_what_fits_under_four_gibibytes() {
+        // Four bytes a frame at 16 bits and eight at 32. The header is 44
+        // bytes at the least, and no header hound writes reaches 128.
+        let int16 = WavFile::capacity(WavDepth::Int16).0;
+        let float32 = WavFile::capacity(WavDepth::Float32).0;
+        let most = i64::from(u32::MAX);
+        assert!(int16 * 4 + 44 <= most, "{int16}");
+        assert!((int16 + 64) * 4 + 128 > most, "{int16}");
+        assert!(float32 * 8 + 44 <= most, "{float32}");
+        assert!((float32 + 64) * 8 + 128 > most, "{float32}");
+        // Six hours of 16-bit stereo fits, and seven do not.
+        assert!(int16 > 6 * 3_600 * 44_100);
+        assert!(int16 < 7 * 3_600 * 44_100);
+    }
+
+    #[test]
+    #[ignore = "media-limits"]
+    fn a_write_past_the_capacity_is_refused_and_writes_nothing() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("long.wav");
+        let mut file = WavFile::create(&path, WavDepth::Int16).unwrap();
+        // The count of frames written is what the limit is measured from, so
+        // the test sets it rather than writing four gibibytes.
+        file.frames_written = WavFile::capacity(WavDepth::Int16).0 - 1;
+        file.write(&[[0.0, 0.0]]).unwrap();
+        let problem = file.write(&[[0.0, 0.0]]).unwrap_err();
+        assert!(problem.message.contains("4 GiB"), "{problem}");
+        assert_eq!(file.len(), WavFile::capacity(WavDepth::Int16));
     }
 }

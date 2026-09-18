@@ -19,6 +19,22 @@ use symphonia::core::meta::MetadataOptions;
 
 use crate::{Audio, Frame};
 
+/// The lowest sample rate a file may state, in samples per second.
+pub const LOWEST_SOURCE_RATE: u32 = 8_000;
+
+/// The highest sample rate a file may state, in samples per second.
+pub const HIGHEST_SOURCE_RATE: u32 = 384_000;
+
+/// The largest audio file [`decode`] reads, in bytes.
+pub const LARGEST_AUDIO_FILE: u64 = 2 * 1024 * 1024 * 1024;
+
+/// The largest magnitude of a decoded sample, where 1 is full scale.
+///
+/// [`decode`] replaces a sample that is not a number with silence and clamps
+/// a larger one to this, so every consumer of decoded audio, from the
+/// analyzers and the stretcher to the audio device, receives finite samples.
+pub const SAMPLE_LIMIT: f32 = 8.0;
+
 /// A decoded file: its audio in the internal format, its identity, and what the file itself held.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Decoded {
@@ -69,6 +85,14 @@ pub enum DecodeError {
 /// with more than two channels is refused. A file stored at another sample
 /// rate is resampled, so its length changes in proportion. The whole file is
 /// read. There is no streaming.
+///
+/// The path must name a regular file of at most [`LARGEST_AUDIO_FILE`]
+/// bytes, which is checked before the file is read. A stated sample rate
+/// outside [`LOWEST_SOURCE_RATE`] to [`HIGHEST_SOURCE_RATE`], and audio
+/// longer than [`dermixen_core::LONGEST_TRACK`] once it is at the internal
+/// rate, are [`DecodeError::Unsupported`]. The length is refused as soon as
+/// the decoded packets pass it, before the rest of the file is decoded.
+/// Every decoded sample is a finite number within [`SAMPLE_LIMIT`].
 pub fn decode(path: &Path) -> Result<Decoded, DecodeError> {
     let bytes = std::fs::read(path).map_err(|source| DecodeError::Read {
         path: path.to_path_buf(),

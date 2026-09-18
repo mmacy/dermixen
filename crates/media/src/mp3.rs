@@ -139,6 +139,17 @@ pub struct Mp3File {
 }
 
 impl Mp3File {
+    /// Starts an MP3 file in a file that is already open, which is how a
+    /// caller writes through [`dermixen_core::files::AtomicFile`]. `path`
+    /// names the file in error messages and is never opened or removed.
+    pub fn from_file(file: File, path: &Path) -> Result<Mp3File, Mp3Error> {
+        let _ = file;
+        Err(cannot_write(
+            path,
+            "writing to an open file is not implemented",
+        ))
+    }
+
     /// Starts an MP3 file at `path`, replacing any file already there.
     pub fn create(path: &Path) -> Result<Mp3File, Mp3Error> {
         // The encoder starts first, because `File::create` truncates any

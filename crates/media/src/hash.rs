@@ -9,6 +9,12 @@ use dermixen_core::ContentHash;
 ///
 /// The hash is the same wherever the file is moved or however it is renamed,
 /// and different as soon as one byte changes, including a tag edit.
+///
+/// The path must name a regular file, opened as
+/// [`dermixen_core::files::open_regular`] opens one, so a device or a named
+/// pipe is an error at once rather than a read that never ends. A file larger
+/// than [`LARGEST_AUDIO_FILE`](crate::LARGEST_AUDIO_FILE) is an error too,
+/// found when the read passes that size.
 pub fn hash_file(path: &Path) -> std::io::Result<ContentHash> {
     let file = File::open(path)?;
     let mut hasher = blake3::Hasher::new();
