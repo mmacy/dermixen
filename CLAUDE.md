@@ -23,9 +23,9 @@ cargo run -p dermixen-cli -- --help
 cargo run --release -p dermixen-app -- set.dmx
 ```
 
-The workspace needs Rust 1.95 or newer, because the window is built on `eframe` 0.36. `rustup update stable` brings a toolchain up to date. The window is slow in a debug build, so run it with `--release`.
+`rust-toolchain.toml` names the toolchain the workspace builds with, and `rustup` installs it on the first cargo command. The window needs at least Rust 1.95, because it is built on `eframe` 0.36. The window is slow in a debug build, so run it with `--release`.
 
-Continuous integration runs the formatting check, the lints, and the tests on Linux and macOS for every push to `main` and every pull request, and a `cargo deny check` confirms that every dependency's license is allowed, that no dependency carries an unaddressed security advisory or an unpinned wildcard version, and that every dependency comes from a known source. `scripts/check.sh` runs the formatting check, the lints, and the tests locally. On Linux the audio output needs the ALSA development headers, which is the `libasound2-dev` package on Debian and Ubuntu. The workflow installs it.
+Continuous integration runs the formatting check, the lints, and the tests on Linux and macOS for every push to `main` and every pull request. A `cargo deny check` confirms that every dependency's license is allowed. It also confirms that no dependency carries an unaddressed security advisory or an unpinned wildcard version, and that every dependency comes from a known source. `scripts/check.sh` runs the formatting check, the lints, and the tests locally. On Linux the audio output needs the ALSA development headers, which is the `libasound2-dev` package on Debian and Ubuntu. The workflow installs it.
 
 The documentation in `docs/` is also a MkDocs site. `uv sync` installs the toolchain that `pyproject.toml` lists, `uv run mkdocs serve` serves the site locally, and `uv run mkdocs build --strict` builds the site and fails on a broken link or a page missing from the navigation in `mkdocs.yml`. The `Docs` workflow in `.github/workflows/docs.yml` builds the site the same way and publishes it to GitHub Pages at https://mmacy.github.io/dermixen/ on every push to `main` that changes the docs. The docs build isn't part of `scripts/check.sh`.
 

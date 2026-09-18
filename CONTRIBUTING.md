@@ -13,7 +13,7 @@ Correctness is shown by things that run as well as by review: acceptance tests, 
 
 ## Before you open a pull request
 
-`scripts/check.sh` runs what continuous integration runs: the formatting check, the lints with warnings as errors, and every test in the workspace. It must pass on your machine. Continuous integration runs the same three commands on Linux and macOS, and `cargo deny check` against `deny.toml`, for every pull request. That check covers licenses, security advisories, dependency bans, and dependency sources.
+`scripts/check.sh` runs what continuous integration runs: the formatting check, the lints with warnings as errors, and every test in the workspace. It must pass on your machine. `rust-toolchain.toml` pins the toolchain continuous integration and `scripts/check.sh` build with, and `rustup` installs it on the first cargo command in this repository. Continuous integration runs the same three commands on Linux and macOS, and `cargo deny check` against `deny.toml`, for every pull request. That check covers licenses, security advisories, dependency bans, and dependency sources.
 
 ```
 scripts/check.sh

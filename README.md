@@ -13,7 +13,7 @@ What you hear in the window is what a render writes, because preview and render 
 
 ## Prerequisites
 
-- Rust 1.95 or newer. `rustup update stable` brings a toolchain up to date.
+- `rust-toolchain.toml` names the toolchain the workspace builds with, and `rustup` installs it on the first cargo command. The window needs at least Rust 1.95, because it is built on `eframe` 0.36.
 - A C and C++ compiler, and `make`. The build compiles three vendored libraries (the Signalsmith stretcher, the aubio beat tracker, and libkeyfinder) from source, and builds the LAME MP3 encoder with its own configure script and `make`. On macOS, the Xcode command line tools provide all of them.
 - On Linux, the ALSA development headers, which the build needs for audio output: the `libasound2-dev` package on Debian and Ubuntu.
 
