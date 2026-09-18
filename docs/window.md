@@ -18,7 +18,7 @@ The window prints one line on standard error for the mix it opens: `Opened` and 
 
 `dermixen-app --help` prints the usage and exits with code 0. The exit codes otherwise match the `dermixen` command as `docs/cli.md` describes them: 0 when the window opened and closed, 1 when the mix could not be read or is not a mix document, with one line beginning `error:` on standard error saying which, and 2 when the command line could not be read, which is more than one argument. The window also exits with code 1 when it cannot read the settings file. That `error:` line names the settings file and what is wrong, and the line the problem is on when the file has one, which a file the operating system refuses to read does not. The window reads the settings file before it opens on the mix, and `docs/settings.md` describes the file.
 
-Building the window needs a Rust compiler of version 1.95 or newer, which is what `eframe` needs.
+`rust-toolchain.toml` names the toolchain the workspace builds with, and `rustup` installs it on the first cargo command. The window needs at least Rust 1.95, because it is built on `eframe` 0.36.
 
 ## Opening a mix from the desktop
 
