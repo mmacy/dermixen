@@ -660,7 +660,6 @@ proptest! {
 }
 
 #[test]
-#[ignore = "document-size"]
 fn a_mix_whose_text_is_larger_than_the_app_reads_is_not_written() {
     // Every value is within its limit, and the text is past the 16 MiB the
     // app reads, so writing it would leave a document nothing opens again.

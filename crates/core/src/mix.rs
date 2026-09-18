@@ -558,10 +558,28 @@ impl Mix {
     ///
     /// Every writer of a mix document calls this before it touches the disk,
     /// so no command and no window action replaces a document with one that
-    /// cannot be opened again.
+    /// cannot be opened again. Besides the checks [`Mix::check`] runs, the
+    /// text itself must be at most
+    /// [`LARGEST_DOCUMENT`](crate::files::LARGEST_DOCUMENT) bytes, which is
+    /// how large a document the app reads back. A mix that fails only this
+    /// last check is still a sound mix: [`Mix::check`] accepts it, and fewer
+    /// tracks or fewer envelope and tempo nodes bring the text back under the
+    /// limit. The error this returns for an oversized document has an empty
+    /// field, as [`Mix::from_json`] gives for text that is not JSON.
     pub fn checked_json(&self) -> Result<String, MixFileError> {
         self.check()?;
-        Ok(self.to_json())
+        let text = self.to_json();
+        if text.len() as u64 > crate::files::LARGEST_DOCUMENT {
+            return Err(MixFileError {
+                field: String::new(),
+                message: format!(
+                    "this document would be {} bytes, and the app reads at most {} bytes: remove some tracks or some nodes and try again",
+                    text.len(),
+                    crate::files::LARGEST_DOCUMENT
+                ),
+            });
+        }
+        Ok(text)
     }
 
     /// Writes the project file text for this mix, indented for reading.
