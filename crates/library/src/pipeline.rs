@@ -267,10 +267,12 @@ pub enum ScanIntoError {
 /// record at the same path whose loudness is absent: that file is decoded
 /// and its loudness measured, the rest of the record is left as it was, and
 /// the scan reports [`Change::Completed`]. A new hash means the file is
-/// analyzed with `analyzers` and stored. A file that cannot be decoded or
-/// analyzed is recorded in the summary and the scan goes on, and a file whose
-/// decoding or analysis panics is recorded the same way, with the panic's
-/// message as the reason. `progress` is
+/// analyzed with `analyzers` and stored, and so does a hash whose row the
+/// library cannot read, because analyzing the file again is what replaces
+/// such a row. The scan reports [`Change::Added`] for either. A file that
+/// cannot be decoded or analyzed is recorded in the summary and the scan goes
+/// on, and a file whose decoding or analysis panics is recorded the same way,
+/// with the panic's message as the reason. `progress` is
 /// called once per file, in the order the files were found, and answers
 /// whether the scan goes on: `false` ends the scan after that file, with
 /// the summary's `stopped` set and the files after it untouched. Only a
@@ -322,15 +324,23 @@ pub fn scan_into(
 /// at the same file. Catching it here costs the person that one file and
 /// leaves the rest of the folder to be scanned.
 ///
-/// The analyzers this call wraps hold no state that a panic part way through
-/// could leave half changed: each takes the audio and answers, and the scan
-/// gives the answer straight to the library. Nothing the caught work touched
-/// is read again, since the file it was working on is recorded as failed and
-/// nothing of that file is stored. A panic that would have to unwind through
-/// a foreign library, such as the key detector, never reaches here, because
-/// Rust ends the process at that boundary instead. The panic itself still
-/// prints to the error output, as every panic does, so a defect stays visible
-/// while the scan goes on.
+/// The analyzers this call wraps take the audio and answer, and the scan
+/// gives the answer straight to the library, so a panic part way through
+/// leaves no half-written analysis behind. Nothing the caught work touched is
+/// read again, since the file it was working on is recorded as failed and
+/// nothing of that file is stored.
+///
+/// One piece of state does outlive a single file. The key detector builds
+/// libkeyfinder's two tone profiles once per process, guarded by a
+/// `std::sync::Once`, and a `Once` whose closure panics is poisoned, which
+/// makes every later call panic. That closure is a single call into the C++
+/// shim, which catches every exception itself and returns, so the closure has
+/// nothing to panic with and the `Once` is never poisoned. A panic that would
+/// have to unwind through the C++ library never reaches here either, because
+/// Rust ends the process at that boundary instead.
+///
+/// The panic still prints to the error output, as every panic does, so a
+/// defect stays visible while the scan goes on.
 fn without_panicking<T>(work: impl FnOnce() -> T) -> Result<T, String> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).map_err(|panic| {
         let message = panic
@@ -360,9 +370,18 @@ fn deal_with(
             return Ok(Change::Failed);
         }
     };
+    // A row the library cannot read is no record for the scan's purpose. The
+    // file in front of the scan is the one thing that can mend such a row, so
+    // the scan analyzes the file again and stores the answer over the row,
+    // which is why this one error becomes `None` rather than ending the scan.
+    let stored = match index.get(hash) {
+        Ok(found) => found,
+        Err(IndexError::Record { .. }) => None,
+        Err(problem) => return Err(problem.into()),
+    };
     // The hash is the track's identity, so a file the library already contains
     // is never decoded or analyzed again, however it was renamed or moved.
-    if let Some(mut record) = index.get(hash)? {
+    if let Some(mut record) = stored {
         if record.path == file {
             // A record stored without a loudness gets one here, and
             // measuring it needs the audio. Nothing else about the record

@@ -155,7 +155,12 @@ pub enum IndexError {
     /// A row of the library file is not a track: one of its values has a type
     /// the library never writes, or one of its numbers is outside the range a
     /// mix document accepts.
-    #[error("the library file holds no readable track for {path}: {message}")]
+    ///
+    /// A scan of the folder the file sits in analyzes the file again and
+    /// stores the answer over the row, which is the remedy the message names.
+    #[error(
+        "the library file's record for {path} is damaged ({message}), so scan that file's folder again to replace the record"
+    )]
     Record {
         /// The file the row names.
         path: PathBuf,
@@ -287,7 +292,9 @@ impl Index {
     ///
     /// A file this call creates on a Unix system is readable and writable by
     /// its owner alone, because the library names every file in the person's
-    /// music folder. A file that already exists keeps the permissions it has.
+    /// music folder. A file that already exists keeps the permissions it has,
+    /// and a path that is a symbolic link stays a link with the file it points
+    /// at created that way.
     ///
     /// Several programs may open one new file at the same moment. Each reads
     /// the version and lays out the tables inside one write transaction and
@@ -620,18 +627,44 @@ impl Index {
 /// which on most systems lets every local user read it, and a library names
 /// every audio file in a person's music folder. A file that already exists
 /// keeps the permissions it has, because the permissions are the person's to
-/// choose. A failure here is left to SQLite to report, since the same path
-/// fails again the moment SQLite opens it.
+/// choose.
+///
+/// A path that is a symbolic link names the file SQLite writes, so the file
+/// created here is the one the link points at, however many links lead there.
+/// The link is left as it is. A link pointing at another link is followed for
+/// [`LINKS_FOLLOWED`] steps, which ends a chain that leads back to itself.
+///
+/// Nothing is reported when the file cannot be created. SQLite opens the same
+/// path next and says what went wrong, and the one case where SQLite succeeds
+/// after this call fails is a path that already exists, which is the case
+/// where there is nothing to create.
 #[cfg(unix)]
 fn create_for_the_owner_alone(path: &Path) {
     use std::os::unix::fs::OpenOptionsExt;
 
+    let mut target = path.to_path_buf();
+    for _ in 0..LINKS_FOLLOWED {
+        let Ok(next) = std::fs::read_link(&target) else {
+            break;
+        };
+        target = match target.parent() {
+            // A link's target is read against the folder the link sits in.
+            Some(folder) if next.is_relative() => folder.join(next),
+            _ => next,
+        };
+    }
     let _ = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .open(path);
+        .open(&target);
 }
+
+/// How many symbolic links [`create_for_the_owner_alone`] follows from the
+/// library path before it gives up. A person's library path leads through one
+/// link at most, and a chain this long is a chain that leads back to itself.
+#[cfg(unix)]
+const LINKS_FOLLOWED: u32 = 16;
 
 /// Leaves the library file to SQLite to create, which is what happens on a
 /// system with no Unix permissions.
@@ -642,10 +675,11 @@ fn create_for_the_owner_alone(_path: &Path) {}
 /// write, named as a kind and a name, or `None` when the file contains only
 /// what Dermixen writes.
 ///
-/// A file that holds a trigger, a view, or a table of somebody else's is a
-/// file some other program or person has shaped, and what Dermixen would read
-/// from it or write into it is theirs to decide rather than Dermixen's. Such
-/// a file is refused whole.
+/// A file that holds a trigger, a view, or a table Dermixen did not write is
+/// a file some other program or person has shaped. What a read of that file
+/// would answer, and what a write into it would set off, follow from that
+/// other program's objects rather than from Dermixen's, so Dermixen refuses
+/// the file whole.
 fn foreign_object(connection: &Connection) -> rusqlite::Result<Option<String>> {
     let mut statement = connection.prepare("SELECT type, name FROM sqlite_master")?;
     let mut objects = statement.query([])?;

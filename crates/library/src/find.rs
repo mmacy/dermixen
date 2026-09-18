@@ -137,8 +137,8 @@ fn alike(one: &str, other: &str) -> bool {
 /// letter.
 ///
 /// A search compares every word of the text with every word of every record,
-/// so this walks the letters of both words where they stand rather than
-/// collecting either word into a vector of characters.
+/// so this walks the letters of both words where they stand, without copying
+/// either word.
 fn one_letter_apart(one: &str, other: &str) -> bool {
     let one_letters = one.chars().count();
     let other_letters = other.chars().count();

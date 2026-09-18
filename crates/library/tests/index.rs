@@ -807,7 +807,6 @@ fn a_new_library_file_is_for_its_owner_alone() {
 
 #[cfg(unix)]
 #[test]
-#[ignore = "library-hardening-scan"]
 fn a_new_library_file_reached_through_a_link_is_for_its_owner_alone() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
