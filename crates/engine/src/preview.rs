@@ -185,6 +185,31 @@ pub(crate) struct Channel {
 }
 
 impl Channel {
+    /// Takes the lock on the queue, whether or not a thread panicked while it
+    /// held that lock.
+    ///
+    /// A mutex in Rust is poisoned once a thread panics while holding its
+    /// guard, and every later lock on that mutex reports the poisoning. A
+    /// [`Queue`] holds counts and a queue of frames, and every change made
+    /// under the lock is a few assignments, so a queue a panic left behind is
+    /// still one the next caller can read and write. A device's audio
+    /// callback pulls through this lock on the thread the callback runs on,
+    /// which has a few milliseconds to hand audio back and no way to catch a
+    /// panic, so this takes the queue back instead of panicking.
+    fn locked(&self) -> MutexGuard<'_, Queue> {
+        self.queue
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Waits on [`room`](Channel::room) for the queue and takes it back on
+    /// the terms [`locked`](Channel::locked) states.
+    fn waited<'a>(&self, queue: MutexGuard<'a, Queue>) -> MutexGuard<'a, Queue> {
+        self.room
+            .wait(queue)
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// A channel with room for `capacity` frames, for the span of `length`
     /// frames that begins at output frame `at`.
     fn new(capacity: usize, length: i64, at: i64) -> Channel {
@@ -249,7 +274,7 @@ impl Channel {
     /// how many that was, which is none when the feed is already full. This
     /// never waits.
     fn fill(&self, block: &[Frame]) -> usize {
-        self.take(self.queue.lock().unwrap(), block)
+        self.take(self.locked(), block)
     }
 
     /// Waits until the feed has room, then puts as many of `block`'s frames in
@@ -260,9 +285,9 @@ impl Channel {
     /// through a preview stops the render rather than leaving it waiting for
     /// room that will never come.
     fn put(&self, block: &[Frame]) -> Result<usize, String> {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.locked();
         while queue.frames.len() >= self.capacity && queue.failure.is_none() {
-            queue = self.room.wait(queue).unwrap();
+            queue = self.waited(queue);
         }
         if let Some(message) = &queue.failure {
             return Err(message.clone());
@@ -289,12 +314,12 @@ impl Channel {
     pub(crate) fn deliver(&self, block: &[Frame], run: u64) -> Result<(), String> {
         let mut rest = block;
         while !rest.is_empty() {
-            let mut queue = self.queue.lock().unwrap();
+            let mut queue = self.locked();
             while (queue.frames.len() >= self.capacity || (queue.paused && !queue.holding))
                 && queue.failure.is_none()
                 && queue.run == run
             {
-                queue = self.room.wait(queue).unwrap();
+                queue = self.waited(queue);
             }
             if let Some(message) = &queue.failure {
                 return Err(message.clone());
@@ -321,7 +346,7 @@ impl Channel {
     /// take the audition back into the track and the frames of the new
     /// position are made when it does.
     pub(crate) fn room_for_audition(&self) -> Option<Room> {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.locked();
         loop {
             if queue.failure.is_some() || queue.closed || queue.at >= self.length {
                 return None;
@@ -334,7 +359,7 @@ impl Channel {
                     frames: self.capacity - queue.frames.len(),
                 });
             }
-            queue = self.room.wait(queue).unwrap();
+            queue = self.waited(queue);
         }
     }
 
@@ -355,7 +380,7 @@ impl Channel {
     /// rewritten frames. That thread then makes the block again under the
     /// new setting.
     pub(crate) fn remake(&self, rewrite: impl FnOnce(i64, &mut [Frame])) -> i64 {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.locked();
         let at = queue.at;
         rewrite(at, queue.frames.make_contiguous());
         queue.run += 1;
@@ -376,7 +401,7 @@ impl Channel {
     /// move, and the thread making the frames wakes to make the frames of
     /// `to`.
     pub(crate) fn move_to(&self, to: i64) {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.locked();
         if queue.failure.is_some() || queue.at >= self.length {
             return;
         }
@@ -441,7 +466,7 @@ impl Channel {
     /// The new run's number and the frame it begins at come back, and a
     /// render waiting for room wakes to find the run it was filling gone.
     pub(crate) fn restart(&self, where_to: impl FnOnce(i64) -> (i64, bool)) -> (u64, i64) {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.locked();
         let (at, paused) = where_to(queue.at);
         queue.frames.clear();
         queue.at = at;
@@ -461,7 +486,7 @@ impl Channel {
     /// more is coming. A run the transport has already abandoned changes
     /// nothing.
     pub(crate) fn delivered(&self, run: u64) {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.locked();
         if queue.run == run {
             queue.delivered = true;
             queue.holding = false;
@@ -474,14 +499,14 @@ impl Channel {
     /// A render waiting out a pause in [`deliver`](Channel::deliver) is woken
     /// by the resumption, so it takes up where it left off.
     pub(crate) fn set_paused(&self, paused: bool) {
-        self.queue.lock().unwrap().paused = paused;
+        self.locked().paused = paused;
         self.room.notify_all();
     }
 
     /// Everything a transport reports about itself, read in one look under
     /// the lock.
     pub(crate) fn reading(&self) -> Reading {
-        let queue = self.queue.lock().unwrap();
+        let queue = self.locked();
         Reading {
             at: queue.at,
             reached: queue.at + queue.frames.len() as i64,
@@ -494,7 +519,7 @@ impl Channel {
 
     /// Which run of the render the feed is taking frames from.
     pub(crate) fn run(&self) -> u64 {
-        self.queue.lock().unwrap().run
+        self.locked().run
     }
 
     /// Ends the feed for good: nothing more will be delivered, the render
@@ -502,7 +527,7 @@ impl Channel {
     /// audition's frames wakes to find the feed closed, and an output that
     /// pulls until the feed is finished stops pulling.
     pub(crate) fn close(&self) {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.locked();
         queue.run += 1;
         queue.delivered = true;
         queue.ended = true;
@@ -513,7 +538,7 @@ impl Channel {
 
     /// How many frames are waiting to be pulled.
     fn waiting(&self) -> usize {
-        self.queue.lock().unwrap().frames.len()
+        self.locked().frames.len()
     }
 
     /// Marks the render's last frame as delivered, so that an output waiting
@@ -522,7 +547,7 @@ impl Channel {
     /// A span played all the way through was already marked ended as its last
     /// frame went in, so this is what marks a span the render gave up on.
     fn end(&self) {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.locked();
         queue.delivered = true;
         queue.ended = true;
     }
@@ -531,7 +556,7 @@ impl Channel {
     /// away the frames it will never take, then wakes whoever waits on the
     /// feed.
     pub(crate) fn fail(&self, message: &str) {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.locked();
         if queue.failure.is_none() {
             queue.failure = Some(message.to_owned());
         }
@@ -542,7 +567,7 @@ impl Channel {
 
     /// What stopped the preview for good, if anything has.
     pub(crate) fn failure(&self) -> Option<String> {
-        self.queue.lock().unwrap().failure.clone()
+        self.locked().failure.clone()
     }
 
     /// Whether the output has pulled every frame the render delivered and
@@ -554,7 +579,7 @@ impl Channel {
     /// stopped with frames still waiting in its feed.
     #[cfg(feature = "playback")]
     fn played_out(&self) -> bool {
-        let queue = self.queue.lock().unwrap();
+        let queue = self.locked();
         queue.failure.is_none() && queue.delivered && queue.frames.is_empty()
     }
 
@@ -567,21 +592,21 @@ impl Channel {
     /// under the lock, so a preview is never told the feed has drained
     /// alongside a stale count of what was played out of it.
     fn pulled_since(&self, since: i64) -> (i64, bool) {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.locked();
         while queue.pulled == since && !queue.frames.is_empty() {
-            queue = self.room.wait(queue).unwrap();
+            queue = self.waited(queue);
         }
         (queue.pulled, queue.frames.is_empty())
     }
 
     /// How many frames the output has pulled so far.
     fn pulled(&self) -> i64 {
-        self.queue.lock().unwrap().pulled
+        self.locked().pulled
     }
 
     /// How many pulls got fewer frames than they asked for.
     fn underruns(&self) -> u64 {
-        self.queue.lock().unwrap().underruns
+        self.locked().underruns
     }
 }
 
@@ -613,7 +638,7 @@ impl Feed {
     /// that is buffering or paused has none ready however many its render
     /// has put in, since the device is meant to hear silence then.
     pub fn available(&self) -> usize {
-        let queue = self.channel.queue.lock().unwrap();
+        let queue = self.channel.locked();
         if queue.holding || queue.paused {
             0
         } else {
@@ -631,13 +656,13 @@ impl Feed {
     /// frame at the track's length has gone in, and false again after a move
     /// takes the audition back into the track.
     pub fn ended(&self) -> bool {
-        self.channel.queue.lock().unwrap().ended
+        self.channel.locked().ended
     }
 
     /// Whether the feed has [`ended`](Feed::ended) and every frame has been
     /// pulled, so the device has nothing more to play.
     pub fn finished(&self) -> bool {
-        let queue = self.channel.queue.lock().unwrap();
+        let queue = self.channel.locked();
         queue.ended && queue.frames.is_empty()
     }
 
@@ -672,7 +697,7 @@ impl Feed {
     /// [`Transport`](crate::Transport) counts none while the transport is
     /// buffering or paused.
     pub fn pull_from(&mut self, out: &mut [Frame]) -> (Samples, usize) {
-        let mut queue = self.channel.queue.lock().unwrap();
+        let mut queue = self.channel.locked();
         let at = Samples(queue.at);
         if queue.holding || queue.paused {
             // A transport means the device to hear silence here, so it gets
@@ -717,6 +742,18 @@ impl Feed {
     /// leaving it waiting forever.
     pub fn fail(&self, message: &str) {
         self.channel.fail(message);
+    }
+}
+
+/// A sample as an audio device is handed it: silence for a sample that is
+/// not a finite number, and otherwise the sample held within full scale, so
+/// that no device receives a value it cannot play. A rendered file is held
+/// within full scale the same way when it is written.
+pub fn device_sample(sample: f32) -> f32 {
+    if sample.is_finite() {
+        sample.clamp(-1.0, 1.0)
+    } else {
+        0.0
     }
 }
 
@@ -778,7 +815,9 @@ pub struct PlayReport {
 /// [`RenderError::Output`], and is not stopped, since it never started; an
 /// output whose device stops taking frames after starting says so through
 /// [`Feed::fail`], and the preview ends with the same error holding the
-/// device's message; any other error is as for `render_range`. When the preview ends early
+/// device's message. A mix that [`dermixen_core::Mix::check`] refuses ends
+/// the preview with [`RenderError::Document`] before the output is started
+/// at all. Any other error is as for `render_range`. When the preview ends early
 /// because of an error, the render marks the feed ended before anything
 /// else, so an output that is waiting for frames stops waiting instead of
 /// stalling. Whenever the output was started, it has been stopped by the
@@ -792,6 +831,9 @@ pub fn play(
     lookahead: Samples,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<PlayReport, RenderError> {
+    // A mix no document may hold is refused before the output is touched, so
+    // a device is never opened for a mix that has nothing to render.
+    mix.check().map_err(RenderError::Document)?;
     let total = mix_length(mix).0;
     let span = clip(&span, total);
     if span.is_empty() {
@@ -920,6 +962,19 @@ const STREAM_RATE: cpal::SampleRate = dermixen_core::SAMPLE_RATE;
 #[cfg(feature = "playback")]
 const TAIL: std::time::Duration = std::time::Duration::from_millis(200);
 
+/// How many frames the buffer a device's callback pulls into holds.
+///
+/// The buffer is made once, before the stream is built, and the callback
+/// never grows it, because growing a vector allocates and an allocation on
+/// the thread the callback runs on can take longer than the few milliseconds
+/// that thread has to hand audio back. A device that asks for more frames
+/// than this in one call is served by pulling more than once, so this is a
+/// working size rather than a limit on what a device may ask for. Four
+/// thousand and ninety-six frames is about ninety-three milliseconds, which
+/// is more than an output device ordinarily asks for in one call.
+#[cfg(feature = "playback")]
+const CALLBACK_FRAMES: usize = 4096;
+
 /// The default audio output device of the machine, opened through `cpal`.
 ///
 /// The stream runs at the internal sample rate of 44.1 kHz in stereo; a
@@ -996,10 +1051,10 @@ impl Output for CpalOutput {
                 None => cpal::BufferSize::Default,
             },
         };
-        // The frames one call of the device's callback pulls. It is kept
-        // across calls so that a callback grows it at most once, on the first
-        // call, rather than allocating while the device is waiting for audio.
-        let mut ready: Vec<Frame> = Vec::new();
+        // The frames one call of the device's callback pulls. It is made here
+        // and kept across calls, and the callback never resizes it, so no
+        // call allocates while the device is waiting for audio.
+        let mut ready: Vec<Frame> = vec![[0.0, 0.0]; CALLBACK_FRAMES];
         // Two more handles on the same channel the feed pulls from: one this
         // output keeps, so that stopping knows whether the span was played all
         // the way out, and one for the device's error path, which tells the
@@ -1014,18 +1069,34 @@ impl Output for CpalOutput {
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     let channels = usize::from(CHANNELS);
                     let wanted = data.len() / channels;
-                    if ready.len() < wanted {
-                        ready.resize(wanted, [0.0, 0.0]);
+                    // How many frames of this buffer have been filled from the
+                    // feed. A device that asks for more frames than the buffer
+                    // above holds is served by pulling again rather than by
+                    // growing that buffer.
+                    let mut filled = 0;
+                    while filled < wanted {
+                        let asking = (wanted - filled).min(ready.len());
+                        // The pull never waits, so a render that has fallen
+                        // behind leaves the rest of this buffer silent
+                        // instead of holding the device up.
+                        let got = feed.pull(&mut ready[..asking]);
+                        let written = &mut data[filled * channels..];
+                        for (frame, out) in
+                            ready[..got].iter().zip(written.chunks_exact_mut(channels))
+                        {
+                            // Nothing reaches the device that has not been
+                            // through this, so a sample the render made that
+                            // no device can play is silence rather than
+                            // whatever the device makes of it.
+                            out[0] = device_sample(frame[0]);
+                            out[1] = device_sample(frame[1]);
+                        }
+                        filled += got;
+                        if got < asking {
+                            break;
+                        }
                     }
-                    // The pull never waits, so a render that has fallen behind
-                    // leaves the rest of this buffer silent instead of holding
-                    // the device up.
-                    let got = feed.pull(&mut ready[..wanted]);
-                    for (frame, out) in ready[..got].iter().zip(data.chunks_exact_mut(channels)) {
-                        out[0] = frame[0];
-                        out[1] = frame[1];
-                    }
-                    for sample in &mut data[got * channels..] {
+                    for sample in &mut data[filled * channels..] {
                         *sample = 0.0;
                     }
                 },

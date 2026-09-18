@@ -1058,3 +1058,22 @@ fn an_output_that_cannot_start_ends_the_preview_with_its_message() {
     );
     assert!(!capture.started);
 }
+
+#[test]
+fn a_device_is_handed_only_samples_it_can_play() {
+    use dermixen_engine::device_sample;
+    for (given, handed) in [
+        (0.0, 0.0),
+        (0.5, 0.5),
+        (-1.0, -1.0),
+        (1.0, 1.0),
+        (1.5, 1.0),
+        (-8.0, -1.0),
+        (1e30, 1.0),
+        (f32::INFINITY, 0.0),
+        (f32::NEG_INFINITY, 0.0),
+        (f32::NAN, 0.0),
+    ] {
+        assert_eq!(device_sample(given), handed, "{given}");
+    }
+}

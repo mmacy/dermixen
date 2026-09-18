@@ -76,6 +76,11 @@ pub enum RenderError {
         /// What the loader said.
         message: String,
     },
+    /// The mix is not one a document may hold, so it has no safe layout: a
+    /// tempo, a beat, a level, or a length is out of range, or the mix is
+    /// longer than the longest mix. [`dermixen_core::Mix::check`] decides.
+    #[error("the mix cannot be rendered: {0}")]
+    Document(dermixen_core::MixFileError),
     /// The sink could not take a block of the mix.
     #[error("the mix could not be written: {0}")]
     Write(String),
@@ -401,7 +406,16 @@ impl Playing {
 /// source it returns is dropped after the last block that does. A mix of
 /// many tracks therefore needs only the tracks that overlap the current
 /// block in memory at once, which is what lets a ninety-minute mix render
-/// on an ordinary machine. A source whose length differs from the track's
+/// on an ordinary machine.
+///
+/// A mix that [`dermixen_core::Mix::check`] refuses is refused here with
+/// [`RenderError::Document`] naming the field that is out of range, before
+/// the mix is laid out, before a track is loaded, and before a stretcher is
+/// made. A source sample that is not a finite number is read as silence, so
+/// no stretcher, no equalizer, and no sum receives one, and a sample that is
+/// a finite number is passed on unchanged.
+///
+/// A source whose length differs from the track's
 /// declared length is refused with [`RenderError::SourceLength`] when it is
 /// loaded, a loader that fails stops the render with [`RenderError::Load`],
 /// and a sink that fails stops it with [`RenderError::Write`]; in each case
@@ -674,6 +688,12 @@ fn render_blocks(
     progress: &mut dyn FnMut(Progress),
     carry: &mut Carry<'_>,
 ) -> Result<Samples, RenderError> {
+    // A mix no document may hold has no safe layout, so the run refuses it
+    // here, before a track is loaded, a stretcher is made, or the timeline is
+    // worked out. Every entry point that renders a span reaches this
+    // function, so this one check covers all of them.
+    mix.check().map_err(RenderError::Document)?;
+
     let mut held = Held::Lent(mix);
     let Some(mut timeline) = held.mix().timeline() else {
         return Ok(Samples::ZERO);
@@ -755,9 +775,13 @@ fn render_blocks(
         // block of the run, so neither is offered as a place to take one.
         let asking_again = (at >= span.start && end < until).then_some(end);
         if let Some(handover) = carry(asking_again) {
-            // A document with no tracks has no timeline and nothing left to
-            // render, so the run ends here rather than going on with a
+            // A document that Mix::check refuses has no safe layout, and a
+            // document with no tracks has no timeline and nothing left to
+            // render. The run ends here for both rather than going on with a
             // document it cannot lay out.
+            if handover.mix.check().is_err() {
+                break;
+            }
             let Some(laid_out) = handover.mix.timeline() else {
                 break;
             };
@@ -914,7 +938,17 @@ pub(crate) fn clip(span: &Range<Samples>, length: i64) -> Range<i64> {
 /// the moment the latest track ends. A mix with no tracks has none. This is
 /// the length a span is clipped to, so a command that refuses a start past
 /// the end of the mix measures the end here.
+///
+/// A mix [`dermixen_core::Mix::check`] refuses has none either, because such
+/// a mix has no length the render would ever deliver: every entry point of
+/// the engine refuses it. Answering zero rather than laying such a mix out
+/// is what keeps this function from reaching the panic
+/// [`dermixen_core::Mix::timeline`] documents, which only a mix built in
+/// memory and never checked can reach.
 pub fn mix_length(mix: &Mix) -> Samples {
+    if mix.check().is_err() {
+        return Samples::ZERO;
+    }
     Samples(mix.timeline().map_or(0, |timeline| {
         (timeline.end() - timeline.start()).to_samples().0.max(0)
     }))
@@ -942,6 +976,10 @@ pub fn mix_length(mix: &Mix) -> Samples {
 /// [`Decibels::SILENCE`], that track adds nothing to the mix whatever its
 /// gain. An empty mix renders to empty audio. The render is deterministic:
 /// the same document and sources always give identical output.
+///
+/// A mix that [`dermixen_core::Mix::check`] refuses is refused with
+/// [`RenderError::Document`], and a source sample that is not a finite number
+/// is read as silence, both as [`render_to`] describes.
 pub fn render(
     mix: &Mix,
     sources: &[Audio],
@@ -953,6 +991,10 @@ pub fn render(
             sources: sources.len(),
         });
     }
+    // The layout below reads the mix, so the mix is checked before it. The
+    // block loop checks the mix again, which costs one further pass over the
+    // tracks and happens once per render rather than once per block.
+    mix.check().map_err(RenderError::Document)?;
     let mut mixed = Audio::new();
     // Laying the mix out gives the finished length before the first block
     // arrives, so the one buffer this form collects into is allocated once
@@ -974,9 +1016,29 @@ pub fn render(
     Ok(mixed)
 }
 
+/// A source sample as the render reads it: the sample itself when it is a
+/// finite number, and silence when it is not.
+///
+/// One sample that is not finite would otherwise pass into the state a
+/// stretcher keeps and the state an equalizer keeps, and from there into the
+/// sum of every track sounding with it, so a whole passage of the mix would
+/// come out as silence or as a value no device can play. The decoder screens
+/// the audio it produces. This function screens the audio a render reads,
+/// whatever produced that audio.
+fn finite(sample: f32) -> f32 {
+    if sample.is_finite() { sample } else { 0.0 }
+}
+
 /// Fills `input` with the track's frames from `from` up to but not including
 /// `to`, where every position before the track's first sample or after its
-/// last one is silence.
+/// last one is silence, and so is every sample that is not a finite number.
+///
+/// This is the one place a render reads a track's own audio, so screening
+/// the samples here keeps them from every stretcher, every equalizer, and
+/// every sum, and costs one test per sample on the way in rather than one
+/// per sample at each later stage. A sample that is a finite number is
+/// passed on unchanged, so a render of clean audio is the render it was
+/// before.
 fn gather(input: &mut Vec<Frame>, source: &[Frame], from: i64, to: i64) {
     input.clear();
     input.reserve((to - from).max(0) as usize);
@@ -986,7 +1048,7 @@ fn gather(input: &mut Vec<Frame>, source: &[Frame], from: i64, to: i64) {
             .and_then(|index| source.get(index))
             .copied()
             .unwrap_or([0.0, 0.0]);
-        input.push(frame);
+        input.push([finite(frame[0]), finite(frame[1])]);
     }
 }
 
