@@ -65,15 +65,40 @@ fn absolute(path: &Path) -> Result<PathBuf, String> {
 
 /// Opens the library file at `path`, creating the file and the folders above
 /// it when they are not there yet, so that a first run needs no setup.
+///
+/// A folder this command creates is readable, writable, and enterable by its
+/// owner alone, because the library names every audio file a person owns and
+/// nobody else on the machine has business reading that list. A folder that
+/// is already there keeps the permissions it has, which is the case of a
+/// library file in a folder the person chose. The library crate creates the
+/// file itself with the same reach, as `docs/library.md` states.
 pub fn open(path: &Path) -> Result<Index, String> {
     if let Some(folder) = path.parent()
         && !folder.as_os_str().is_empty()
         && !folder.exists()
     {
-        std::fs::create_dir_all(folder)
+        make_private_folder(folder)
             .map_err(|problem| format!("cannot make the folder {}: {problem}", folder.display()))?;
     }
     Index::open(path).map_err(|problem| problem.to_string())
+}
+
+/// Creates `folder` and every folder above it that is missing, each of them
+/// for its owner alone.
+#[cfg(unix)]
+fn make_private_folder(folder: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(folder)
+}
+
+/// Creates `folder` and every folder above it that is missing, on a system
+/// with no permission bits to ask for.
+#[cfg(not(unix))]
+fn make_private_folder(folder: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(folder)
 }
 
 /// Opens the library file at `path` for a command that only reads it,

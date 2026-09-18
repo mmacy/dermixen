@@ -6,7 +6,7 @@
 //! replaces the grid analyzer with one that answers with the typed grid.
 
 use dermixen_analysis::{AnalysisError, BeatAnalysis, BeatAnalyzer};
-use dermixen_core::{BeatGrid, Bpm, Seconds};
+use dermixen_core::{BeatGrid, Bpm, LONGEST_TRACK, Seconds};
 use dermixen_library::{AnalyzerSet, Analyzers};
 use dermixen_media::Audio;
 
@@ -25,9 +25,12 @@ pub struct Given {
 impl Given {
     /// The beat grid these options name, or `None` when no tempo was given.
     ///
-    /// A tempo that is not a positive finite number and a first beat that is
-    /// not a finite number are both refused, each naming the option it came
-    /// from.
+    /// Each of the two values is held to the range a mix document gives it,
+    /// which `DESIGN.md` states under "Limits", and the message names the
+    /// option the value came from. A tempo runs from [`Bpm::LOWEST`] to
+    /// [`Bpm::HIGHEST`], and a first beat is within [`LONGEST_TRACK`] of the
+    /// track's own first sample in either direction, since a grid whose first
+    /// beat is further out than a track can be describes no track.
     pub fn grid(&self) -> Result<Option<BeatGrid>, String> {
         let Some(bpm) = self.bpm else {
             return Ok(None);
@@ -35,15 +38,18 @@ impl Given {
         let bpm = Bpm(bpm);
         if !bpm.is_valid() {
             return Err(format!(
-                "--bpm must be a positive finite number of beats per minute, not {}",
+                "--bpm must be from {} to {} beats per minute, not {}",
+                Bpm::LOWEST.0,
+                Bpm::HIGHEST.0,
                 bpm.0
             ));
         }
         let first_beat = Seconds(self.first_beat.unwrap_or(0.0));
-        if !first_beat.0.is_finite() {
+        let furthest = LONGEST_TRACK.to_seconds();
+        if !first_beat.0.is_finite() || first_beat.0.abs() > furthest.0 {
             return Err(format!(
-                "--first-beat must be a finite number of seconds, not {}",
-                first_beat.0
+                "--first-beat must be from -{} to {} seconds, which is the longest track, not {}",
+                furthest.0, furthest.0, first_beat.0
             ));
         }
         Ok(Some(BeatGrid {
@@ -122,8 +128,8 @@ mod tests {
     }
 
     #[test]
-    fn a_tempo_that_is_not_a_positive_number_is_refused_by_name() {
-        for bpm in [0.0, -1.0, f64::NAN] {
+    fn a_tempo_outside_the_range_a_document_holds_is_refused_by_name() {
+        for bpm in [0.0, -1.0, f64::NAN, 19.9, 1_000.0] {
             let message = Given {
                 bpm: Some(bpm),
                 first_beat: None,

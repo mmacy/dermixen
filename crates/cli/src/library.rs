@@ -11,6 +11,7 @@ use serde::Serialize;
 
 use crate::analyze::print_json;
 use crate::analyzers::{Chosen, Given};
+use crate::text::{note, say};
 
 /// What `library scan --json` prints.
 #[derive(Debug, Serialize)]
@@ -114,6 +115,32 @@ where
             Ok((one, one))
         }
     }
+}
+
+/// Reads a tempo range written as `LOW-HIGH`, or as one tempo.
+///
+/// The `f64` parser accepts text like `nan` and `inf`, which no tempo is,
+/// and the library holds tempos from [`Bpm::LOWEST`] to [`Bpm::HIGHEST`]
+/// because that is the range a mix document holds. Each end is held to that
+/// range, so a query never asks for a tempo no record has, and a range
+/// written the wrong way round is refused rather than matching nothing.
+fn tempo_range(option: &str, text: &str) -> Result<(Bpm, Bpm), String> {
+    let (low, high) = range::<f64>(option, text)?;
+    for end in [low, high] {
+        if !Bpm(end).is_valid() {
+            return Err(format!(
+                "{option} {text} cannot be read: {end} is not a tempo, which runs from {} to {} beats per minute",
+                Bpm::LOWEST.0,
+                Bpm::HIGHEST.0
+            ));
+        }
+    }
+    if low > high {
+        return Err(format!(
+            "{option} {text} cannot be read: {low} is faster than {high}"
+        ));
+    }
+    Ok((Bpm(low), Bpm(high)))
 }
 
 /// Reads a length range written as `LOW-HIGH`, with each end as minutes and
@@ -223,10 +250,7 @@ fn folder(under: &Path) -> Result<PathBuf, String> {
 /// Turns the conditions a person typed into the query the library takes.
 fn query_of(args: &QueryArgs) -> Result<Query, String> {
     let bpm = match &args.bpm {
-        Some(text) => {
-            let (low, high) = range::<f64>("--bpm", text)?;
-            Some((Bpm(low), Bpm(high)))
-        }
+        Some(text) => Some(tempo_range("--bpm", text)?),
         None => None,
     };
     let year = match &args.year {
@@ -338,7 +362,7 @@ pub fn scan(
     };
 
     let mut report = |progress: &Progress<'_>| {
-        eprintln!(
+        note!(
             "[{}/{}] {} {}",
             progress.done,
             progress.total,
@@ -403,23 +427,23 @@ fn report_of(library: &Path, root: &Path, summary: &ScanSummary) -> ScanReport {
 /// Prints the summary of a scan as text: the counts, then a line for each
 /// file the scan passed over or could not read.
 fn print_summary(summary: &ScanSummary) {
-    println!("added {}", summary.added);
-    println!("moved {}", summary.moved);
-    println!("unchanged {}", summary.unchanged);
-    println!("completed {}", summary.completed);
-    println!("duplicates {}", summary.duplicates.len());
+    say!("added {}", summary.added);
+    say!("moved {}", summary.moved);
+    say!("unchanged {}", summary.unchanged);
+    say!("completed {}", summary.completed);
+    say!("duplicates {}", summary.duplicates.len());
     for (path, kept) in &summary.duplicates {
-        println!(
+        say!(
             "duplicate {}, already in the library as {}",
             path.display(),
             kept.display()
         );
     }
     for (path, reason) in &summary.failed {
-        println!("failed {}: {reason}", path.display());
+        say!("failed {}: {reason}", path.display());
     }
     for folder in &summary.unreadable {
-        println!("unreadable {}: {}", folder.path.display(), folder.reason);
+        say!("unreadable {}: {}", folder.path.display(), folder.reason);
     }
 }
 
@@ -472,15 +496,38 @@ pub fn query(args: &QueryArgs, library: Option<&Path>, json: bool) -> Result<(),
     let query = query_of(args)?;
     let location = crate::index::location(library, &settings)?;
     let index = crate::index::open(&location)?;
-    let records = index.query(&query).map_err(|problem| problem.to_string())?;
+    let (records, skipped) = index
+        .query_with_skipped(&query)
+        .map_err(|problem| problem.to_string())?;
+    say_how_many_were_skipped(skipped);
     if json {
         print_json(&records);
     } else {
         for record in &records {
-            println!("{}", listing_line(record));
+            say!("{}", listing_line(record));
         }
     }
     Ok(())
+}
+
+/// Says on standard error how many rows a query matched and could not read,
+/// when there were any, and what puts such a row right.
+///
+/// A row whose value is of the wrong type, whose text is not UTF-8, or whose
+/// number no mix document would hold is left out of the answer and counted,
+/// so one damaged row costs the person that row rather than the whole
+/// library. The count goes to standard error whether or not `--json` was
+/// asked for, so the listing and the JSON document are both the records
+/// alone.
+fn say_how_many_were_skipped(skipped: usize) {
+    if skipped == 0 {
+        return;
+    }
+    note!(
+        "warning: {skipped} {} in the library could not be read and {} left out. Scanning the folder those tracks are in with dermixen library scan replaces a damaged row.",
+        if skipped == 1 { "track" } else { "tracks" },
+        if skipped == 1 { "was" } else { "were" }
+    );
 }
 
 /// Carries out `library find`.
@@ -488,9 +535,10 @@ pub fn find(text: &str, limit: usize, library: Option<&Path>, json: bool) -> Res
     let settings = crate::settings::read()?;
     let location = crate::index::location(library, &settings)?;
     let index = crate::index::open(&location)?;
-    let records = index
-        .query(&Query::default())
+    let (records, skipped) = index
+        .query_with_skipped(&Query::default())
         .map_err(|problem| problem.to_string())?;
+    say_how_many_were_skipped(skipped);
     let matches = rank(&records, text, limit);
     if json {
         let ranked: Vec<Ranked> = matches
@@ -503,7 +551,7 @@ pub fn find(text: &str, limit: usize, library: Option<&Path>, json: bool) -> Res
         print_json(&ranked);
     } else {
         for found in &matches {
-            println!("{:.2}  {}", found.score, found.record.path.display());
+            say!("{:.2}  {}", found.score, found.record.path.display());
         }
     }
     Ok(())

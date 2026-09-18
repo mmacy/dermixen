@@ -3,8 +3,9 @@
 //! in `.mp3` in either case, a 320 kbps constant bit rate MP3.
 
 use std::ops::Range;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use dermixen_core::files::AtomicFile;
 use dermixen_core::{Mix, Samples, Seconds, Track};
 pub(crate) use dermixen_engine::mix_length;
 use dermixen_engine::{Resampler, Source, TimeStretcher, render_range};
@@ -13,6 +14,7 @@ use serde::Serialize;
 
 use crate::analyze::print_json;
 use crate::show::length_text;
+use crate::text::{note, say};
 
 /// What `render --json` prints.
 #[derive(Debug, Serialize)]
@@ -192,30 +194,36 @@ enum Output {
 }
 
 impl Output {
-    /// Starts the file that will contain the render's frames at `temp`, an
-    /// MP3 when `out` ends in `.mp3` in either case and a WAV otherwise.
-    /// `temp` is the temporary file beside the command's real output, `out`.
+    /// Starts the file that will contain the render's frames in `writing`,
+    /// the temporary file that will be moved onto the command's real output,
+    /// `out`. The frames go into an MP3 when `out` ends in `.mp3` in either
+    /// case and into a WAV otherwise.
     ///
-    /// A build without the `mp3` feature refuses an MP3 output before it
-    /// creates anything at `temp`, with a message naming `out`, since that
-    /// is the name the person gave, and the missing feature.
-    fn create(temp: &Path, out: &Path) -> Result<Output, String> {
+    /// A build without the `mp3` feature refuses an MP3 output with a
+    /// message naming `out`, since that is the name the person gave, and the
+    /// missing feature.
+    fn create(writing: &AtomicFile, out: &Path) -> Result<Output, String> {
+        let file = writing
+            .file()
+            .try_clone()
+            .map_err(|problem| format!("cannot write {}: {problem}", out.display()))?;
         if wants_mp3(out) {
             #[cfg(feature = "mp3")]
             {
-                return dermixen_media::Mp3File::create(temp)
+                return dermixen_media::Mp3File::from_file(file, out)
                     .map(Output::Mp3)
                     .map_err(|problem| problem.to_string());
             }
             #[cfg(not(feature = "mp3"))]
             {
+                drop(file);
                 return Err(format!(
                     "{} ends in .mp3, and this dermixen was built without the mp3 feature, so it cannot write an MP3",
                     out.display()
                 ));
             }
         }
-        WavFile::create(temp, WavDepth::Int16)
+        WavFile::from_file(file, out, WavDepth::Int16)
             .map(Output::Wav)
             .map_err(|problem| problem.to_string())
     }
@@ -256,19 +264,78 @@ pub(crate) fn keylock_stretcher(_warned: &mut bool) -> Box<dyn TimeStretcher> {
 pub(crate) fn keylock_stretcher(warned: &mut bool) -> Box<dyn TimeStretcher> {
     if !*warned {
         *warned = true;
-        eprintln!(
+        note!(
             "warning: this dermixen was built without a pitch-preserving stretcher, so tracks with keylock are resampled and their pitch moves with their speed"
         );
     }
     Box::new(Resampler::new())
 }
 
-/// The file the render writes into before it is finished, beside the output
-/// so that moving it into place is a rename within one folder.
-pub(crate) fn temporary_beside(out: &Path) -> PathBuf {
-    let mut name = out.as_os_str().to_owned();
-    name.push(".part");
-    PathBuf::from(name)
+/// Starts the file a render or a capture writes, which replaces `out` in one
+/// step once the whole render has finished.
+///
+/// The frames go into a temporary file beside `out` whose name nobody can
+/// work out in advance, so a symbolic link somebody planted at a name this
+/// command might have chosen is never written through, and a run that stops
+/// partway leaves no file at all. `out` keeps its permissions when a file is
+/// already there, as replacing an earlier render does.
+pub(crate) fn writing_to(out: &Path) -> Result<AtomicFile, String> {
+    AtomicFile::create(out, false)
+        .map_err(|problem| format!("cannot write {}: {problem}", out.display()))
+}
+
+/// Refuses an output that is the mix document or one of its tracks.
+///
+/// `render` and `play --capture` both read the document and every track of
+/// it, and neither writes over a file it reads, whether the output names one
+/// of those files directly, through `..`, through a symbolic link, or
+/// through a hard link. An output that is an earlier render is replaced,
+/// which is what `render` is for.
+pub(crate) fn refuse_the_mix_and_its_tracks(
+    out: &Path,
+    mix: &Path,
+    document: &Mix,
+) -> Result<(), String> {
+    crate::paths::refuse_an_input(out, "the mix document", &[mix])?;
+    let tracks: Vec<&Path> = document
+        .tracks
+        .iter()
+        .map(|track| track.path.as_path())
+        .collect();
+    crate::paths::refuse_an_input(out, "a track of the mix", &tracks)
+}
+
+/// How many frames a render of `span` writes from a mix `total` frames long.
+/// A span that runs past the end of the mix stops there, and a span that
+/// starts past the end writes nothing.
+pub(crate) fn span_frames(span: &Range<Samples>, total: Samples) -> Samples {
+    Samples(span.end.min(total).0.saturating_sub(span.start.0).max(0))
+}
+
+/// Refuses a mix too long for the WAV file it is about to be written into.
+///
+/// A WAV file describes at most 4 GiB, which at sixteen bits and two
+/// channels is about six hours and forty-five minutes, while a mix document
+/// may lay out as much as twenty-four hours. The check runs before anything
+/// is created, so a mix over the limit costs the person the message alone,
+/// and the message points at the MP3 output, which has no such limit. An
+/// output that already ends in `.mp3` is not checked.
+pub(crate) fn refuse_a_mix_too_long_for_a_wav(out: &Path, frames: Samples) -> Result<(), String> {
+    if wants_mp3(out) {
+        return Ok(());
+    }
+    let capacity = WavFile::capacity(WavDepth::Int16);
+    if frames <= capacity {
+        return Ok(());
+    }
+    Err(format!(
+        "{} would be {} long, which is {} frames, and a WAV file describes at most 4 GiB, which is {} frames at sixteen bits ({} long). Write the mix to a name ending in .mp3, which has no such limit, or render a span of it with --from and --for.",
+        out.display(),
+        length_text(frames.to_seconds()),
+        frames.0,
+        capacity.0,
+        length_text(capacity.to_seconds())
+    ))
 }
 
 /// Checks that every track's file still holds the bytes it held when it was
@@ -380,17 +447,31 @@ impl SpanRequest {
 /// Decodes a track's audio the first time the render needs it, saying on
 /// standard error which of the mix's `total` tracks is being read, since
 /// decoding a long track takes a noticeable moment.
+///
+/// The decoder hashes the file as it reads it, and the hash it reports must
+/// be the hash the document names. [`check_hashes`] has already compared the
+/// two, and comparing them again here covers a file that changed between
+/// that check and this read, so the frames a render writes are always the
+/// frames the document names.
 pub(crate) fn decoder(
     total: usize,
 ) -> impl FnMut(usize, &Track) -> Result<Box<dyn Source>, String> {
     move |index: usize, track: &Track| -> Result<Box<dyn Source>, String> {
-        eprintln!(
+        note!(
             "decoding track {} of {}: {}",
             index + 1,
             total,
             track.path.display()
         );
         let decoded = decode(&track.path).map_err(|problem| problem.to_string())?;
+        if decoded.hash != track.hash {
+            return Err(format!(
+                "{} changed while it was being read: its hash is now {}, and the mix names the hash {}",
+                track.path.display(),
+                decoded.hash,
+                track.hash
+            ));
+        }
         Ok(Box::new(decoded.audio))
     }
 }
@@ -428,12 +509,13 @@ pub struct Args<'a> {
 
 /// Carries out the `render` command.
 ///
-/// Every track's file is hashed first, then the mix, or the span of it that
-/// `--from` and `--for` select as `docs/cli.md` describes, is rendered block
-/// by block into a temporary file beside the output, which is moved into
-/// place only once the whole render has finished. A render that fails at
-/// any point leaves no file where the output was asked for and no temporary
-/// file either.
+/// The output is checked against the command's own inputs first, then every
+/// track's file is hashed, and then the mix, or the span of it that `--from`
+/// and `--for` select as `docs/cli.md` describes, is rendered block by block
+/// into a temporary file beside the output, which is moved into place only
+/// once the whole render has finished. A render that fails at any point
+/// leaves no file where the output was asked for and no temporary file
+/// either.
 ///
 /// `--handover N` gives the span instead of `--from` and `--for`, and clap
 /// refuses a command line that has `--handover` and either of the other two.
@@ -444,6 +526,7 @@ pub fn run(args: &Args<'_>) -> Result<(), String> {
     let (mix, out, json) = (args.mix, args.out, args.json);
     let span = SpanRequest::read(args.from, args.length)?;
     let document = crate::document::read(mix)?;
+    refuse_the_mix_and_its_tracks(out, mix, &document)?;
     let handover = args
         .handover
         .map(|into_track| handover_clip(mix, &document, into_track))
@@ -455,13 +538,13 @@ pub fn run(args: &Args<'_>) -> Result<(), String> {
         },
         None => span,
     };
-    let span = span.resolve(mix_length(&document))?;
+    let total = mix_length(&document);
+    let span = span.resolve(total)?;
+    refuse_a_mix_too_long_for_a_wav(out, span_frames(&span, total))?;
     check_hashes(&document.tracks, mix)?;
 
-    let temporary = temporary_beside(out);
-    let mut file = Output::create(&temporary, out).inspect_err(|_| {
-        let _ = std::fs::remove_file(&temporary);
-    })?;
+    let writing = writing_to(out)?;
+    let mut file = Output::create(&writing, out)?;
 
     let mut load = decoder(document.tracks.len());
     let mut stretch = stretchers();
@@ -472,7 +555,7 @@ pub fn run(args: &Args<'_>) -> Result<(), String> {
     let mut next_report = span.start;
     let mut progress = |progress: dermixen_engine::Progress| {
         if progress.written >= next_report {
-            eprintln!(
+            note!(
                 "rendered {} of {}",
                 length_text(progress.written.to_seconds()),
                 length_text(progress.total.to_seconds())
@@ -489,22 +572,13 @@ pub fn run(args: &Args<'_>) -> Result<(), String> {
         &mut sink,
         &mut progress,
     );
-    let length = match rendered {
-        Ok(length) => length,
-        Err(problem) => {
-            drop(file);
-            let _ = std::fs::remove_file(&temporary);
-            return Err(problem.to_string());
-        }
-    };
-    if let Err(problem) = file.finish() {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(problem);
-    }
-    std::fs::rename(&temporary, out).map_err(|problem| {
-        let _ = std::fs::remove_file(&temporary);
-        format!("cannot write {}: {problem}", out.display())
-    })?;
+    // The temporary file is removed when `writing` is dropped, so every way
+    // out from here on leaves nothing behind unless the commit has run.
+    let length = rendered.map_err(|problem| problem.to_string())?;
+    file.finish()?;
+    writing
+        .commit()
+        .map_err(|problem| format!("cannot write {}: {problem}", out.display()))?;
 
     let seconds = length.to_seconds();
     if json {
@@ -515,14 +589,14 @@ pub fn run(args: &Args<'_>) -> Result<(), String> {
             handover: handover.as_ref().map(Handover::times),
         });
     } else {
-        println!(
+        say!(
             "wrote {}: {} long, {} samples",
             out.display(),
             length_text(seconds),
             length.0
         );
         if let Some(clip) = &handover {
-            println!("{}", clip.line());
+            say!("{}", clip.line());
         }
     }
     Ok(())
@@ -533,15 +607,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_temporary_file_sits_beside_the_output() {
-        let temporary = temporary_beside(Path::new("/music/mixes/out.wav"));
+    fn a_mix_over_the_wav_limit_is_refused_and_an_mp3_is_not() {
+        let capacity = WavFile::capacity(WavDepth::Int16);
+        let over = Samples(capacity.0 + 1);
+        assert!(refuse_a_mix_too_long_for_a_wav(Path::new("out.wav"), capacity).is_ok());
+        let message = refuse_a_mix_too_long_for_a_wav(Path::new("out.wav"), over).unwrap_err();
+        assert!(
+            message.contains("4 GiB") && message.contains(".mp3"),
+            "{message}"
+        );
+        assert!(refuse_a_mix_too_long_for_a_wav(Path::new("out.mp3"), over).is_ok());
+    }
+
+    #[test]
+    fn a_span_past_the_end_of_the_mix_stops_there() {
+        let total = Samples(1_000);
+        assert_eq!(span_frames(&(Samples(0)..Samples(i64::MAX)), total), total);
         assert_eq!(
-            temporary.parent(),
-            Path::new("/music/mixes/out.wav").parent()
+            span_frames(&(Samples(400)..Samples(600)), total),
+            Samples(200)
         );
         assert_eq!(
-            temporary.file_name().unwrap().to_str().unwrap(),
-            "out.wav.part"
+            span_frames(&(Samples(2_000)..Samples(3_000)), total),
+            Samples(0)
         );
     }
 

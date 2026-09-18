@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use dermixen_library::{TrackRecord, analyze_file};
 
+use crate::text::say;
+
 use crate::analyzers::{Chosen, Given};
 
 /// A file's path as the mix documents and the library record it, which is
@@ -31,7 +33,7 @@ pub fn record_of(file: &Path, given: &Given) -> Result<TrackRecord, String> {
 /// Twenty columns is one more than the longest field name this command
 /// prints, so every name keeps at least one space before its value.
 fn field(name: &str, value: &str) {
-    println!("{name:<20}{value}");
+    say!("{name:<20}{value}");
 }
 
 /// A value that may be absent, written as a dash when it is.
@@ -151,10 +153,15 @@ fn loudness_text(record: &TrackRecord) -> String {
 }
 
 /// Prints one value as the single JSON document a command writes.
+///
+/// The text goes out as it stands, because JSON writes a control character
+/// as an escape of its own, and it goes through `crate::text` like every
+/// other write, so a reader that closes the pipe stops the writing rather
+/// than failing the command.
 pub fn print_json<T: serde::Serialize>(value: &T) {
     let text = serde_json::to_string_pretty(value)
         .expect("every field of a command's report has a JSON form, so writing one cannot fail");
-    println!("{text}");
+    crate::text::print_json_text(&text);
 }
 
 /// Carries out the `analyze` command.

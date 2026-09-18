@@ -18,6 +18,7 @@ use dermixen_core::{
 use serde::Serialize;
 
 use crate::analyze::print_json;
+use crate::text::say;
 
 /// The settings there are, in the order `docs/settings.md` lists them. A
 /// person at a terminal reads this list when a command names a setting
@@ -427,7 +428,7 @@ fn print_one(path: &Path, settings: &Settings, folders: &Folders, setting: Setti
     if json {
         print_json(&report(path, settings, folders));
     } else {
-        println!("{}", setting.line(settings, folders));
+        say!("{}", setting.line(settings, folders));
     }
 }
 
@@ -438,9 +439,9 @@ pub fn show(json: bool) -> Result<(), String> {
     if json {
         print_json(&report(&path, &settings, &folders));
     } else {
-        println!("{}", path.display());
+        say!("{}", path.display());
         for setting in SETTINGS {
-            println!("{}", setting.line(&settings, &folders));
+            say!("{}", setting.line(&settings, &folders));
         }
     }
     Ok(())

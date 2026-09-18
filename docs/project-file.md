@@ -47,7 +47,7 @@ The file contains what a render needs and nothing else. Tags and musical key bel
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `path` | string | Where the audio file was last seen. It must not contain a NUL character, since no file system call accepts one. |
+| `path` | string | Where the audio file was last seen. It must not contain a NUL character, since no file system call accepts one. Dermixen writes a path in full, with every symbolic link resolved. A relative path, which only a person editing the file by hand can put there, is resolved against the folder the reading program is running in rather than the folder the document is in, so the same document can name different files from different folders. |
 | `hash` | string | The BLAKE3 hash of the audio file's bytes, as 64 hexadecimal digits. Dermixen writes lowercase and reads either case. The hash identifies the file when it has moved, so `path` is a hint and `hash` is the identity. |
 | `length_samples` | integer | The length of the audio in samples at 44.1 kHz. It must not be negative, and it must be at most 238140000 samples, which is ninety minutes. |
 | `grid` | object | The track's beat grid. See below. |
