@@ -823,3 +823,55 @@ fn a_new_library_file_reached_through_a_link_is_for_its_owner_alone() {
             .is_symlink()
     );
 }
+
+#[test]
+fn a_text_value_of_any_size_in_a_library_file_is_read_up_to_the_longest_tag() {
+    // A scan never stores more than the longest tag, and a library file can
+    // also come from another person, with a title of any size in it.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("library.sqlite");
+    let mut index = Index::open(&path).unwrap();
+    index
+        .upsert(&record(1, "/music/a.mp3", 140.0, Some(1996), None))
+        .unwrap();
+    drop(index);
+    let long = "é".repeat(4 * 1024 * 1024);
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    for column in [
+        "artist",
+        "title",
+        "label",
+        "catalog_number",
+        "release_title",
+        "grid_analyzer",
+        "anchor_analyzer",
+    ] {
+        connection
+            .execute(&format!("UPDATE tracks SET {column} = ?1"), [&long])
+            .unwrap();
+    }
+    drop(connection);
+
+    let index = Index::open(&path).unwrap();
+    let (records, skipped) = index.query_with_skipped(&Query::default()).unwrap();
+    assert_eq!((records.len(), skipped), (1, 0));
+    let read = &records[0];
+    let longest = dermixen_library::LONGEST_TAG;
+    for (name, value) in [
+        ("artist", read.metadata.artist.as_deref()),
+        ("title", read.metadata.title.as_deref()),
+        ("label", read.release.label.as_deref()),
+        ("catalog number", read.release.catalog_number.as_deref()),
+        ("release title", read.release.title.as_deref()),
+        ("grid analyzer", Some(read.grid_analyzer.as_str())),
+        ("anchor analyzer", Some(read.anchor_analyzer.as_str())),
+    ] {
+        let value = value.unwrap_or_else(|| panic!("the {name} was not read"));
+        assert_eq!(value.chars().count(), longest, "the {name}");
+        assert!(
+            value.chars().all(|character| character == 'é'),
+            "the {name}"
+        );
+    }
+    assert_eq!(index.get(hash(1)).unwrap().unwrap(), *read);
+}

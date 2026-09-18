@@ -658,3 +658,38 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn a_mix_whose_text_is_larger_than_the_app_reads_is_not_written() {
+    // Every value is within its limit, and the text is past the 16 MiB the
+    // app reads, so writing it would leave a document nothing opens again.
+    let mut mix = Mix::from_json(&read_fixture("valid/two-tracks.dmx")).unwrap();
+    let nodes: Vec<EnvelopeNode> = (0..400_000)
+        .map(|n| EnvelopeNode {
+            at: Beats(f64::from(n)),
+            value: Decibels(-1.5),
+        })
+        .collect();
+    mix.tracks[0].eq.mid = Envelope::from_nodes(nodes).unwrap();
+    assert!(mix.to_json().len() as u64 > dermixen_core::files::LARGEST_DOCUMENT);
+
+    let problem = mix.checked_json().unwrap_err();
+    assert_eq!(problem.field, "");
+    assert!(problem.message.contains("16777216"), "{problem}");
+    // The mix itself is sound, so an edit is still accepted and only the
+    // writing is refused.
+    assert_eq!(mix.check(), Ok(()));
+
+    // One node fewer than fills the limit is written and reads back.
+    let mut small = Mix::from_json(&read_fixture("valid/two-tracks.dmx")).unwrap();
+    small.tracks[0].eq.mid = Envelope::from_nodes(
+        (0..1_000)
+            .map(|n| EnvelopeNode {
+                at: Beats(f64::from(n)),
+                value: Decibels(-1.5),
+            })
+            .collect(),
+    )
+    .unwrap();
+    assert_eq!(Mix::from_json(&small.checked_json().unwrap()), Ok(small));
+}

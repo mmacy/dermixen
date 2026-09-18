@@ -134,9 +134,9 @@ The choices a person makes once live in one settings file: `settings.toml` in `d
 - **A gain or an envelope level** is from minus 144 to plus 24 decibels.
 - **A sample** that a decoder produces is a finite number from minus 8 to plus 8, where 1 is full scale. The decoder replaces a sample that is not a number with silence and clamps a larger one, so no analyzer, stretcher, render, or audio device receives anything else. The loudness analyzer reports no loudness for audio that measures above 0 LUFS, which no real master does, and a track with no loudness joins a mix at unity gain.
 - **A mix document or an autosave** is at most 16 MiB, and a settings file or a playlist is at most 1 MiB. The app reads all four only from a regular file, never from a device or a named pipe. A key appears at most once in any object of a mix document, and a track's path contains no NUL character.
-- **A tag**: the tag reader keeps the first 1,024 characters of an artist, a title, or any other text field, and the library stores what the tag reader kept.
+- **A tag**: the tag reader and the file name parser each keep the first 1,024 characters of an artist and of a title, and the library stores what they kept.
 
-No command and no window action writes a mix document that the app cannot open again: every writer checks the document against these limits and lays it out before it touches the disk. No writing command replaces one of its own inputs. `render`, `decode`, and `play --capture` replace an existing output file, since a render is made again from its document, and `mix new` refuses to replace an existing document, since a document is work.
+No command and no window action writes a mix document that the app cannot open again: every writer checks the document against these limits, its size included, and lays it out before it touches the disk. `render`, `decode`, and `play --capture` never write over a file they read, which is the mix document, a track of the mix, or the file being decoded, however the output names it. The three commands do replace any other existing output file, since a render is made again from its document, and `mix new` refuses to replace an existing document, since a document is work.
 
 ## Analysis strategy
 

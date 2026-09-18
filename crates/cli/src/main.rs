@@ -8,6 +8,7 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Mutex;
 
 use clap::{ArgGroup, Args, Parser, Subcommand};
 
@@ -377,25 +378,49 @@ enum MixCommand {
 /// `docs/cli.md` lists beside the others.
 const DEFECT: u8 = 3;
 
+/// Where the last panic the hook saw happened, and what it said.
+///
+/// The hook runs for every panic, and a command catches some of them: a scan
+/// catches a panic from the decoding library, reports that one file as
+/// failed, and goes on through the rest of the folder. The hook cannot tell
+/// which panic a command is about to catch, so it prints nothing and leaves
+/// the place and the message here. [`main`] prints the line when the unwind
+/// reaches it, which is the point at which the command really has stopped.
+///
+/// A panic on another thread runs the hook on that thread, so the two threads
+/// share this value. The panic that reaches [`main`] is the last one the hook
+/// saw, because a thread that meets a panic either raises it again on the
+/// main thread or hands back a message the command reports itself.
+static DEFECT_SEEN: Mutex<Option<Defect>> = Mutex::new(None);
+
+/// What one panic said and where it happened.
+struct Defect {
+    /// The file and the line the panic happened at, in the words the line
+    /// prints.
+    place: String,
+    /// What the panic said.
+    message: String,
+}
+
 /// Runs one command and reports what happened as an exit code.
 ///
 /// A defect in dermixen itself is an exit code of its own rather than a
-/// backtrace and whatever code the runtime chooses. The hook prints one line
-/// beginning `error:` that says the command met a defect and names the file
-/// and line it happened at, the unwind is caught here, and the command ends
-/// with [`DEFECT`]. A person reading the terminal, or an agent reading the
-/// exit code, can tell a defect from input dermixen refused, which ends with
-/// code 1.
+/// backtrace and whatever code the runtime chooses. The unwind is caught
+/// here, one line beginning `error:` says the command met a defect and names
+/// the file and the line it happened at, and the command ends with
+/// [`DEFECT`]. A person reading the terminal, or an agent reading the exit
+/// code, can tell a defect from input dermixen refused, which ends with code
+/// 1.
 fn main() -> ExitCode {
     std::panic::set_hook(Box::new(|panic| {
         let place = match panic.location() {
             Some(location) => format!("{}, line {}", location.file(), location.line()),
             None => "a place it cannot name".to_owned(),
         };
-        note!(
-            "error: dermixen met a defect in itself at {place} and stopped: {}. Whatever the command had finished writing is in place, and a file it was part way through writing was not replaced. Please report this.",
-            defect_message(panic)
-        );
+        remember(Defect {
+            place,
+            message: defect_message(panic),
+        });
     }));
     let cli = Cli::parse();
     match std::panic::catch_unwind(|| run(cli.command)) {
@@ -404,13 +429,44 @@ fn main() -> ExitCode {
             note!("error: {message}");
             ExitCode::from(1)
         }
-        // The hook above has already printed the line, so this only decides
-        // the exit code.
-        Err(_) => ExitCode::from(DEFECT),
+        Err(_) => {
+            note!("{}", defect_line());
+            ExitCode::from(DEFECT)
+        }
     }
 }
 
-/// What a panic said, for the one line the hook prints.
+/// Keeps what the hook saw of one panic, for [`main`] to print when the
+/// unwind reaches it.
+///
+/// A lock another thread left poisoned is taken as it stands. What the lock
+/// guards is one [`Defect`] and nothing else, so there is no half-written
+/// state to guard against, and a panic is the moment a person needs the line
+/// most.
+fn remember(defect: Defect) {
+    let mut seen = DEFECT_SEEN.lock().unwrap_or_else(|held| held.into_inner());
+    *seen = Some(defect);
+}
+
+/// The one line a defect that reached [`main`] prints.
+///
+/// An unwind the hook never saw leaves the place and the message out rather
+/// than naming the ones of some earlier panic.
+fn defect_line() -> String {
+    let seen = DEFECT_SEEN.lock().unwrap_or_else(|held| held.into_inner());
+    let met = match seen.as_ref() {
+        Some(defect) => format!(
+            "dermixen met a defect in itself at {} and stopped: {}",
+            defect.place, defect.message
+        ),
+        None => "dermixen met a defect in itself and stopped".to_owned(),
+    };
+    format!(
+        "error: {met}. Whatever the command had finished writing is in place, and a file it was part way through writing was not replaced. Please report this."
+    )
+}
+
+/// What a panic said, for the one line a defect prints.
 fn defect_message(panic: &std::panic::PanicHookInfo<'_>) -> String {
     let said = panic.payload();
     if let Some(text) = said.downcast_ref::<&str>() {
