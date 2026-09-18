@@ -401,3 +401,260 @@ proptest! {
         prop_assert!(timeline.start() <= timeline.end());
     }
 }
+
+/// Reads every fixture in a folder of refused documents and checks the field
+/// and the message of each refusal. Returns how many documents it checked.
+fn check_refused_fixtures(folder: &str) -> usize {
+    let dir = fixture_dir().join(folder);
+    let mut checked = 0;
+    for entry in fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|e| e.to_str()) != Some("dmx") {
+            continue;
+        }
+        let name = path.file_stem().unwrap().to_str().unwrap().to_owned();
+        let text = fs::read_to_string(&path).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(dir.join(format!("{name}.expected.json"))).unwrap(),
+        )
+        .unwrap();
+        let field_starts_with = expected["field_starts_with"].as_str().unwrap();
+        let message_contains = expected["message_contains"].as_str().unwrap();
+        let error = match Mix::from_json(&text) {
+            Ok(_) => panic!("{name}.dmx was accepted"),
+            Err(e) => e,
+        };
+        assert!(
+            error.field.starts_with(field_starts_with),
+            "{name}.dmx: field {:?} does not start with {field_starts_with:?}; message was {:?}",
+            error.field,
+            error.message
+        );
+        assert!(
+            error.message.contains(message_contains),
+            "{name}.dmx: message {:?} does not mention {message_contains:?}",
+            error.message
+        );
+        checked += 1;
+    }
+    checked
+}
+
+#[test]
+fn every_out_of_range_fixture_reports_its_expected_error() {
+    assert_eq!(check_refused_fixtures("out-of-range"), 18);
+}
+
+/// One track whose every limited value sits exactly on its limit.
+fn a_track_on_the_limits(bpm: f64, first_beat: i64, gain: f64, beat: f64) -> String {
+    format!(
+        r#"{{"version": 1, "tracks": [{{
+            "path": "/Users/dermixenuser/audio/edge.wav",
+            "hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "length_samples": 238140000,
+            "grid": {{"first_beat_sample": {first_beat}, "bpm": {bpm}}},
+            "anchors": {{"intro_beat": {}, "outro_beat": {beat}}},
+            "keylock": true,
+            "gain_db": {gain},
+            "volume": [{{"beat": {beat}, "db": 24.0}}, {{"beat": 1, "db": -144.0}}],
+            "eq": {{"low": [], "mid": [], "high": []}},
+            "tempo": [{{"beat": {beat}, "bpm": {bpm}}}]
+        }}]}}"#,
+        -beat
+    )
+}
+
+#[test]
+fn a_value_exactly_on_its_limit_is_accepted() {
+    for (bpm, first_beat, gain) in [(20.0, 238_140_000, 24.0), (999.0, -238_140_000, -144.0)] {
+        let text = a_track_on_the_limits(bpm, first_beat, gain, 10_000_000.0);
+        let mix = Mix::from_json(&text).unwrap_or_else(|e| panic!("{bpm} BPM: {e}"));
+        assert_eq!(mix.check(), Ok(()));
+        let timeline = mix.timeline().unwrap();
+        // Ninety minutes of audio at its own tempo is ninety minutes of mix.
+        assert!(close((timeline.end() - timeline.start()).0, 5_400.0));
+    }
+}
+
+#[test]
+fn one_track_slowed_past_a_day_is_refused_as_too_long() {
+    // Ninety minutes of audio at 999 beats per minute, played at 20, lasts almost 75 hours.
+    let text = a_track_on_the_limits(999.0, 0, 0.0, 0.0).replace(
+        r#""tempo": [{"beat": 0, "bpm": 999}]"#,
+        r#""tempo": [{"beat": 0, "bpm": 20}]"#,
+    );
+    assert!(
+        text.contains(r#""bpm": 20}]"#),
+        "the replacement found nothing: {text}"
+    );
+    let error = Mix::from_json(&text).unwrap_err();
+    assert!(error.message.contains("24 hours"), "{error}");
+}
+
+#[test]
+fn checked_json_is_the_text_of_a_mix_that_reads_back() {
+    let mix = Mix::from_json(&read_fixture("valid/two-tracks.dmx")).unwrap();
+    assert_eq!(mix.check(), Ok(()));
+    assert_eq!(mix.checked_json().unwrap(), mix.to_json());
+    assert_eq!(Mix::new().checked_json().unwrap(), Mix::new().to_json());
+}
+
+#[test]
+fn checked_json_refuses_a_mix_that_would_not_read_back() {
+    let good = Mix::from_json(&read_fixture("valid/two-tracks.dmx")).unwrap();
+
+    // serde_json writes a number that is not finite as null, which no reader accepts.
+    for gain in [f64::NEG_INFINITY, f64::INFINITY, f64::NAN, 24.5] {
+        let mut mix = good.clone();
+        mix.tracks[1].gain = Decibels(gain);
+        let error = mix.checked_json().unwrap_err();
+        assert_eq!(error.field, "tracks[1].gain_db", "gain {gain}: {error}");
+        assert_eq!(mix.check(), Err(error));
+    }
+
+    let mut mix = good.clone();
+    mix.tracks[0].grid.bpm = Bpm(0.0);
+    assert_eq!(mix.checked_json().unwrap_err().field, "tracks[0].grid.bpm");
+
+    let mut mix = good.clone();
+    mix.tracks[1].length = Samples(-1);
+    assert_eq!(
+        mix.checked_json().unwrap_err().field,
+        "tracks[1].length_samples"
+    );
+
+    let mut mix = good.clone();
+    mix.tracks[1].anchors.intro = Beats(0.5);
+    assert_eq!(
+        mix.checked_json().unwrap_err().field,
+        "tracks[1].anchors.intro_beat"
+    );
+
+    // Each anchor is finite, and their difference is not.
+    let mut mix = good.clone();
+    mix.tracks[0].anchors.outro = Beats(1e308);
+    mix.tracks[1].anchors.intro = Beats(-1e308);
+    assert_eq!(
+        mix.checked_json().unwrap_err().field,
+        "tracks[0].anchors.outro_beat"
+    );
+
+    let mut mix = good;
+    mix.tracks[0].tempo.push(TempoNode {
+        at: Beats(f64::NAN),
+        bpm: Bpm(138.0),
+    });
+    let error = mix.checked_json().unwrap_err();
+    assert!(error.field.starts_with("tracks[0].tempo["), "{error}");
+}
+
+/// Numbers chosen to break a layout: each limit, one step past it, and the
+/// largest and smallest magnitudes JSON can state.
+fn hostile_numbers() -> impl Strategy<Value = f64> {
+    prop::sample::select(vec![
+        0.0,
+        1.0,
+        -1.0,
+        0.5,
+        16.0,
+        64.0,
+        896.0,
+        19.999,
+        20.0,
+        138.0,
+        999.0,
+        999.001,
+        1e-300,
+        1e-6,
+        1e4,
+        3e5,
+        1e7,
+        -1e7,
+        10_000_001.0,
+        -10_000_001.0,
+        1e12,
+        1e18,
+        -1e18,
+        1e300,
+        1e308,
+        -1e308,
+        238_140_000.0,
+        238_140_001.0,
+        24.0,
+        -144.0,
+        1e6,
+    ])
+}
+
+/// A number for one field: nine times in ten one of the ordinary values
+/// given, so that most documents are accepted and reach the layout, and
+/// otherwise a hostile number.
+fn mostly(ordinary: &[f64]) -> impl Strategy<Value = f64> + use<> {
+    prop_oneof![
+        9 => prop::sample::select(ordinary.to_vec()),
+        1 => hostile_numbers(),
+    ]
+}
+
+fn hostile_tracks() -> impl Strategy<Value = serde_json::Value> {
+    (
+        (
+            mostly(&[0.0, 44_100.0, 18_522_000.0, 238_140_000.0]),
+            mostly(&[0.0, 4410.0, -4410.0, 238_140_000.0, -238_140_000.0]),
+            mostly(&[20.0, 138.0, 140.0, 999.0]),
+            mostly(&[0.0, 16.0, 64.0, -64.0]),
+            mostly(&[64.0, 896.0, 1024.0, 100_000.0]),
+        ),
+        (
+            mostly(&[0.0, -2.5, 24.0, -144.0]),
+            mostly(&[0.0, 896.0, -10_000_000.0, 10_000_000.0]),
+            mostly(&[0.0, 912.0, -10_000_000.0, 10_000_000.0]),
+            mostly(&[20.0, 138.0, 140.0, 999.0]),
+            any::<bool>(),
+        ),
+    )
+        .prop_map(
+            |((length, first, bpm, intro, outro), (db, at, node_at, node_bpm, keylock))| {
+                // A length and a first beat are whole numbers in the file.
+                let whole = |value: f64| value.clamp(-9e18, 9e18) as i64;
+                serde_json::json!({
+                    "path": "/Users/dermixenuser/audio/hostile.wav",
+                    "hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                    "length_samples": whole(length),
+                    "grid": {"first_beat_sample": whole(first), "bpm": bpm},
+                    "anchors": {"intro_beat": intro, "outro_beat": outro},
+                    "keylock": keylock,
+                    "gain_db": db,
+                    "volume": [{"beat": at, "db": db}],
+                    "eq": {"low": [], "mid": [{"beat": node_at, "db": 0.0}], "high": []},
+                    "tempo": [{"beat": node_at, "bpm": node_bpm}],
+                })
+            },
+        )
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(2000))]
+
+    #[test]
+    fn any_document_from_json_accepts_lays_out_and_writes_back(
+        tracks in prop::collection::vec(hostile_tracks(), 1..4),
+    ) {
+        let text = serde_json::json!({"version": 1, "tracks": tracks}).to_string();
+        let outcome = std::panic::catch_unwind(|| {
+            let Ok(mix) = Mix::from_json(&text) else {
+                return Ok(None);
+            };
+            let timeline = mix.timeline().expect("the mix has a track");
+            let length = (timeline.end() - timeline.start()).0;
+            let written = mix.checked_json().map_err(|e| e.to_string())?;
+            Ok::<_, String>(Some((length, Mix::from_json(&written) == Ok(mix))))
+        });
+        let outcome = outcome.map_err(|_| TestCaseError::fail(format!("panicked on {text}")))?;
+        let outcome = outcome.map_err(|e| TestCaseError::fail(format!("{e} on {text}")))?;
+        if let Some((length, reads_back)) = outcome {
+            prop_assert!((0.0..=24.0 * 3600.0).contains(&length), "{length} seconds for {text}");
+            prop_assert!(reads_back, "the written text reads back as another mix: {text}");
+        }
+    }
+}

@@ -1214,3 +1214,298 @@ proptest! {
         prop_assert_eq!(history.mix(), &original);
     }
 }
+
+/// Every edit here asks for a value outside the limits of a document.
+fn out_of_range_edits() -> Vec<Edit> {
+    let mut slow = track("c", 16.0, 256.0);
+    slow.grid.bpm = Bpm(0.0);
+    let mut loud = track("c", 16.0, 256.0);
+    loud.gain = Decibels(f64::NEG_INFINITY);
+    let mut far = track("c", 16.0, 1e308);
+    far.length = Samples(240 * 44_100);
+    far.anchors.intro = Beats(-1e308);
+    let mut long = track("c", 16.0, 256.0);
+    long.length = Samples(238_140_001);
+    let grid = |first_beat: i64, bpm: f64| BeatGrid {
+        first_beat: Samples(first_beat),
+        bpm: Bpm(bpm),
+    };
+    let insert = |track: Track| Edit::InsertTrack {
+        at: 2,
+        track: Box::new(track),
+        preset: Preset::Cut,
+    };
+    let mut edits = vec![
+        insert(slow),
+        insert(loud),
+        insert(far),
+        insert(long),
+        Edit::SetGrid {
+            track: 0,
+            grid: grid(0, 1e12),
+        },
+        Edit::SetGrid {
+            track: 0,
+            grid: grid(0, 19.999),
+        },
+        Edit::SetGrid {
+            track: 1,
+            grid: grid(i64::MIN, 130.0),
+        },
+        Edit::SetGrid {
+            track: 1,
+            grid: grid(238_140_001, 130.0),
+        },
+        Edit::AddNode {
+            track: 0,
+            curve: Curve::Volume,
+            node: node(8.0, 24.5),
+        },
+        Edit::AddNode {
+            track: 0,
+            curve: Curve::Low,
+            node: node(1e18, 0.0),
+        },
+        Edit::MoveNode {
+            track: 0,
+            curve: Curve::Volume,
+            from: Beats(256.0),
+            to: node(-10_000_001.0, 0.0),
+        },
+        Edit::MoveNode {
+            track: 0,
+            curve: Curve::Volume,
+            from: Beats(256.0),
+            to: node(256.0, -1e6),
+        },
+        Edit::AddTempoNode {
+            track: 0,
+            node: tempo(1e18, 130.0),
+        },
+        Edit::MoveTempoNode {
+            track: 0,
+            from: Beats(256.0),
+            to: tempo(-1e300, 130.0),
+        },
+    ];
+    for to in [1e308, -1e308, 10_000_001.0, -10_000_001.0, 1e18] {
+        for anchor in [Anchor::Intro, Anchor::Outro] {
+            for track in [0, 1] {
+                edits.push(Edit::MoveAnchor {
+                    track,
+                    anchor,
+                    to: Beats(to),
+                });
+            }
+        }
+    }
+    for bpm in [1e-300, 1e-6, 19.999, 999.001, 1e12, 1e308] {
+        edits.push(Edit::AddTempoNode {
+            track: 1,
+            node: tempo(100.0, bpm),
+        });
+        edits.push(Edit::MoveTempoNode {
+            track: 0,
+            from: Beats(256.0),
+            to: tempo(256.0, bpm),
+        });
+        edits.push(Edit::SetTempoAt {
+            mix_beat: Beats(100.0),
+            bpm: Bpm(bpm),
+        });
+        edits.push(Edit::ChangeTempoFrom {
+            mix_beat: Beats(100.0),
+            bpm: Bpm(bpm),
+        });
+    }
+    for mix_beat in [1e308, -1e308, 1e18, f64::INFINITY, f64::NAN] {
+        edits.push(Edit::SetTempoAt {
+            mix_beat: Beats(mix_beat),
+            bpm: Bpm(140.0),
+        });
+        edits.push(Edit::ChangeTempoFrom {
+            mix_beat: Beats(mix_beat),
+            bpm: Bpm(140.0),
+        });
+    }
+    edits
+}
+
+#[test]
+fn an_edit_outside_the_limits_of_a_document_is_refused_and_changes_nothing() {
+    for edit in out_of_range_edits() {
+        let mut mix = two_tracks();
+        let outcome = apply_edit(&mut mix, &edit);
+        assert!(outcome.is_err(), "{edit:?} was accepted");
+        assert_eq!(
+            mix,
+            two_tracks(),
+            "{edit:?} was refused and changed the mix"
+        );
+    }
+}
+
+#[test]
+fn two_anchor_moves_cannot_leave_a_mix_that_has_no_layout() {
+    // Each of these anchors is a finite whole beat, and their difference is
+    // not a finite number, so the layout of the two together would panic.
+    let mut mix = two_tracks();
+    let first = apply_edit(
+        &mut mix,
+        &Edit::MoveAnchor {
+            track: 0,
+            anchor: Anchor::Outro,
+            to: Beats(1e308),
+        },
+    );
+    let second = apply_edit(
+        &mut mix,
+        &Edit::MoveAnchor {
+            track: 1,
+            anchor: Anchor::Intro,
+            to: Beats(-1e308),
+        },
+    );
+    assert!(matches!(first, Err(EditError::OutOfRange(_))), "{first:?}");
+    assert!(
+        matches!(second, Err(EditError::OutOfRange(_))),
+        "{second:?}"
+    );
+    assert_eq!(mix, two_tracks());
+    assert_eq!(mix.check(), Ok(()));
+}
+
+#[test]
+fn an_edit_that_makes_the_mix_longer_than_a_day_is_refused() {
+    // 300,000 beats at 130 beats per minute is more than 38 hours, and every
+    // number in the edit is within its own limit.
+    let mut mix = two_tracks();
+    let outcome = apply_edit(
+        &mut mix,
+        &Edit::MoveAnchor {
+            track: 0,
+            anchor: Anchor::Outro,
+            to: Beats(300_000.0),
+        },
+    );
+    match outcome {
+        Err(EditError::OutOfRange(problem)) => {
+            assert!(problem.message.contains("24 hours"), "{problem}")
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(mix, two_tracks());
+}
+
+fn edge_beats() -> impl Strategy<Value = f64> {
+    prop::sample::select(vec![
+        -10_000_000.0,
+        -9_999_999.0,
+        -300_000.0,
+        -64.0,
+        0.0,
+        16.0,
+        32.0,
+        256.0,
+        512.0,
+        100_000.0,
+        9_999_999.0,
+        10_000_000.0,
+    ])
+}
+
+fn presets() -> impl Strategy<Value = Preset> {
+    prop::sample::select(vec![
+        Preset::Blend,
+        Preset::Cut,
+        Preset::Beatmix { bars: 8 },
+        Preset::BassSwap { bars: 8 },
+        Preset::Beatmix { bars: u32::MAX },
+        Preset::BassSwap { bars: 2_500_000 },
+    ])
+}
+
+fn edits_at_the_limits() -> impl Strategy<Value = Edit> {
+    let anchors = prop::sample::select(vec![Anchor::Intro, Anchor::Outro]);
+    let bpms = prop::sample::select(vec![20.0, 130.0, 999.0]);
+    prop_oneof![
+        (0usize..2, anchors, edge_beats()).prop_map(|(track, anchor, to)| Edit::MoveAnchor {
+            track,
+            anchor,
+            to: Beats(to)
+        }),
+        (
+            0usize..3,
+            edge_beats(),
+            edge_beats(),
+            presets(),
+            bpms.clone()
+        )
+            .prop_map(|(at, intro, outro, preset, bpm)| {
+                let mut new = track("c", intro, outro);
+                new.grid.bpm = Bpm(bpm);
+                Edit::InsertTrack {
+                    at,
+                    track: Box::new(new),
+                    preset,
+                }
+            }),
+        (edge_beats(), bpms.clone()).prop_map(|(at, bpm)| Edit::SetTempoAt {
+            mix_beat: Beats(at),
+            bpm: Bpm(bpm)
+        }),
+        (edge_beats(), bpms.clone()).prop_map(|(at, bpm)| Edit::ChangeTempoFrom {
+            mix_beat: Beats(at),
+            bpm: Bpm(bpm)
+        }),
+        (0usize..2, edge_beats(), bpms.clone()).prop_map(|(track, at, bpm)| Edit::AddTempoNode {
+            track,
+            node: tempo(at, bpm)
+        }),
+        (0usize..2, -238_140_000i64..=238_140_000, bpms).prop_map(|(track, first_beat, bpm)| {
+            Edit::SetGrid {
+                track,
+                grid: BeatGrid {
+                    first_beat: Samples(first_beat),
+                    bpm: Bpm(bpm),
+                },
+            }
+        }),
+        (0usize..2, 0usize..2).prop_map(|(from, to)| Edit::MoveTrack { from, to }),
+    ]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1000))]
+
+    #[test]
+    fn edits_at_the_limits_never_panic_and_never_leave_a_mix_the_reader_refuses(
+        edits in prop::collection::vec(edits_at_the_limits(), 1..6),
+    ) {
+        let outcome = std::panic::catch_unwind(|| {
+            let mut mix = two_tracks();
+            for edit in &edits {
+                let before = mix.clone();
+                match apply_edit(&mut mix, edit) {
+                    Ok(()) => {
+                        if let Err(problem) = mix.check() {
+                            return Err(format!("{edit:?} left a refused mix: {problem}"));
+                        }
+                        if mix.timeline().is_none() && !mix.tracks.is_empty() {
+                            return Err(format!("{edit:?} left a mix with no layout"));
+                        }
+                    }
+                    Err(_) if mix != before => {
+                        return Err(format!("{edit:?} was refused and changed the mix"));
+                    }
+                    Err(_) => {}
+                }
+            }
+            Ok(())
+        });
+        match outcome {
+            Ok(result) => prop_assert_eq!(result, Ok(())),
+            Err(_) => prop_assert!(false, "panicked on {:?}", edits),
+        }
+    }
+}

@@ -39,8 +39,19 @@ pub const TRUE_PEAK_CEILING: Decibels = Decibels(-1.0);
 /// turned down by exactly what brings it to the target, since turning down
 /// never lifts a peak, and a quiet track is turned up by that amount or by
 /// as much as its peaks allow, whichever is less.
+///
+/// The result is always a level a mix document may contain, so the gain can
+/// be written into a document whatever the measurement was. A measurement
+/// that is not a finite number, which a float file can produce, gets
+/// [`Decibels::UNITY`], and a gain the two differences put outside the range
+/// from [`Decibels::LOWEST_LEVEL`] to [`Decibels::HIGHEST_LEVEL`] stops at
+/// the end of that range it passed.
 pub fn leveling_gain(integrated: Lufs, true_peak: Decibels) -> Decibels {
+    if !integrated.0.is_finite() || !true_peak.0.is_finite() {
+        return Decibels::UNITY;
+    }
     let to_target = TARGET_LOUDNESS - integrated;
     let to_ceiling = TRUE_PEAK_CEILING - true_peak;
-    Decibels(to_target.0.min(to_ceiling.0))
+    let gain = to_target.0.min(to_ceiling.0);
+    Decibels(gain.clamp(Decibels::LOWEST_LEVEL.0, Decibels::HIGHEST_LEVEL.0))
 }

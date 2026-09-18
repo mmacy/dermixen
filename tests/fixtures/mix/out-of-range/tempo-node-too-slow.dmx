@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "tracks": [
+    {
+      "path": "/Users/dermixenuser/audio/goa/comp/VA - Goa Vibes [GV001]/03 Slinky Wizard - Lunar Juice.mp3",
+      "hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "length_samples": 18522000,
+      "grid": {
+        "first_beat_sample": 4410,
+        "bpm": 138.0
+      },
+      "anchors": {
+        "intro_beat": 64,
+        "outro_beat": 896
+      },
+      "keylock": true,
+      "gain_db": -2.5,
+      "volume": [
+        {
+          "beat": 896,
+          "db": 0.0
+        },
+        {
+          "beat": 928,
+          "db": -50.0
+        }
+      ],
+      "eq": {
+        "low": [
+          {
+            "beat": 900,
+            "db": 0.0
+          },
+          {
+            "beat": 912,
+            "db": -90.0
+          }
+        ],
+        "mid": [],
+        "high": []
+      },
+      "tempo": [
+        {
+          "beat": 896,
+          "bpm": 0.0001
+        }
+      ]
+    },
+    {
+      "path": "/Users/dermixenuser/audio/goa/artist/Hallucinogen - Twisted [TIPCD01]/01 LSD.wav",
+      "hash": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+      "length_samples": 24255000,
+      "grid": {
+        "first_beat_sample": 0,
+        "bpm": 140.0
+      },
+      "anchors": {
+        "intro_beat": 32,
+        "outro_beat": 1024
+      },
+      "keylock": false,
+      "volume": [
+        {
+          "beat": 32,
+          "db": -50.0
+        },
+        {
+          "beat": 64,
+          "db": 0.0
+        }
+      ],
+      "eq": {
+        "low": [
+          {
+            "beat": 32,
+            "db": -90.0
+          },
+          {
+            "beat": 48,
+            "db": 0.0
+          }
+        ],
+        "mid": [],
+        "high": []
+      },
+      "tempo": [
+        {
+          "beat": 64,
+          "bpm": 140.0
+        }
+      ]
+    }
+  ]
+}

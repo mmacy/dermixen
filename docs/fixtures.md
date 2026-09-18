@@ -20,6 +20,6 @@ To run these tests, point the variable at a local music collection:
 DERMIXEN_LIBRARY=/Volumes/goa cargo test --workspace
 ```
 
-Two more fixture directories back particular suites. `tests/fixtures/mix/` contains one valid project file and twelve invalid ones, each invalid file paired with the error it must produce, which is how the project file's error contract stays pinned. `tests/fixtures/golden/` contains the golden renders its own README describes: audio the render tests compare against, replaced only deliberately.
+Two more fixture directories back particular suites. `tests/fixtures/mix/` contains one valid project file in `valid/`, twelve malformed ones in `invalid/`, and eighteen in `out-of-range/` that are well formed and hold a number outside the limits `DESIGN.md` states, such as a tempo of 19.999 or a playlist that lays out as 36.1 hours of mix. Each refused file is paired with the error it must produce, which is how the project file's error contract stays pinned. `tests/fixtures/golden/` contains the golden renders its own README describes: audio the render tests compare against, replaced only deliberately.
 
 The MixMeister project files under `tests/fixtures/mmp/` are the one exception to the size rule for real material: they are small, and `tools/anchor_truth.py` builds the anchor ground truth in `tests/ground-truth/anchors/` from them. The README beside them lists each file with its track count and tempo range.
