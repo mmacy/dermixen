@@ -339,8 +339,9 @@ pub fn scan_into(
 /// have to unwind through the C++ library never reaches here either, because
 /// Rust ends the process at that boundary instead.
 ///
-/// The panic still prints to the error output, as every panic does, so a
-/// defect stays visible while the scan goes on.
+/// What the panic said becomes the reason that file failed, and the scan puts
+/// that reason on the file's own line, so the defect stays visible without
+/// anything claiming that the scan stopped.
 fn without_panicking<T>(work: impl FnOnce() -> T) -> Result<T, String> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).map_err(|panic| {
         let message = panic
