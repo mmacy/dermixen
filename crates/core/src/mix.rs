@@ -222,10 +222,16 @@ fn shown(value: f64) -> String {
 }
 
 /// Checks that a tempo is one a document may contain, naming the field.
-pub(crate) fn check_tempo(field: String, bpm: Bpm) -> Result<(), MixFileError> {
+///
+/// The field path is built by `field` rather than passed in, because
+/// [`Mix::check`] runs on every edit the window applies and a mix has one of
+/// these checks for every number it holds. A value in range costs nothing,
+/// and only the value that fails is written into a path and a message.
+pub(crate) fn check_tempo(field: impl FnOnce() -> String, bpm: Bpm) -> Result<(), MixFileError> {
     if bpm.is_valid() {
         return Ok(());
     }
+    let field = field();
     // A tempo of zero or less, and a tempo that is not a number, are named
     // for what they are rather than for the range they miss, because neither
     // is a tempo at all.
@@ -242,13 +248,14 @@ pub(crate) fn check_tempo(field: String, bpm: Bpm) -> Result<(), MixFileError> {
     Err(MixFileError { field, message })
 }
 
-/// Checks that a beat is one a document may contain, naming the field.
-pub(crate) fn check_beat(field: String, beat: Beats) -> Result<(), MixFileError> {
+/// Checks that a beat is one a document may contain, naming the field. The
+/// field path is built the way [`check_tempo`] builds it.
+pub(crate) fn check_beat(field: impl FnOnce() -> String, beat: Beats) -> Result<(), MixFileError> {
     if beat.0.is_finite() && beat.0.abs() <= MAX_BEAT.0 {
         return Ok(());
     }
     Err(MixFileError {
-        field,
+        field: field(),
         message: format!(
             "must be a beat from -{limit} to {limit}, not {}",
             shown(beat.0),
@@ -258,13 +265,17 @@ pub(crate) fn check_beat(field: String, beat: Beats) -> Result<(), MixFileError>
 }
 
 /// Checks that a gain or an envelope level is one a document may contain,
-/// naming the field.
-pub(crate) fn check_level(field: String, level: Decibels) -> Result<(), MixFileError> {
+/// naming the field. The field path is built the way [`check_tempo`] builds
+/// it.
+pub(crate) fn check_level(
+    field: impl FnOnce() -> String,
+    level: Decibels,
+) -> Result<(), MixFileError> {
     if level.is_level() {
         return Ok(());
     }
     Err(MixFileError {
-        field,
+        field: field(),
         message: format!(
             "must be a level from {} to {} decibels, not {}",
             Decibels::LOWEST_LEVEL.0,
@@ -318,7 +329,7 @@ pub(crate) fn check_track(index: usize, track: &Track) -> Result<(), MixFileErro
             ),
         });
     }
-    check_tempo(named("grid.bpm"), track.grid.bpm)?;
+    check_tempo(|| named("grid.bpm"), track.grid.bpm)?;
     for (field, beat) in [
         ("anchors.intro_beat", track.anchors.intro),
         ("anchors.outro_beat", track.anchors.outro),
@@ -329,9 +340,9 @@ pub(crate) fn check_track(index: usize, track: &Track) -> Result<(), MixFileErro
                 message: format!("must be a whole beat, not {}", shown(beat.0)),
             });
         }
-        check_beat(named(field), beat)?;
+        check_beat(|| named(field), beat)?;
     }
-    check_level(named("gain_db"), track.gain)?;
+    check_level(|| named("gain_db"), track.gain)?;
     for (curve, envelope) in [
         ("volume", &track.volume),
         ("eq.low", &track.eq.low),
@@ -339,13 +350,13 @@ pub(crate) fn check_track(index: usize, track: &Track) -> Result<(), MixFileErro
         ("eq.high", &track.eq.high),
     ] {
         for (node_index, node) in envelope.nodes().iter().enumerate() {
-            check_beat(named(&format!("{curve}[{node_index}].beat")), node.at)?;
-            check_level(named(&format!("{curve}[{node_index}].db")), node.value)?;
+            check_beat(|| named(&format!("{curve}[{node_index}].beat")), node.at)?;
+            check_level(|| named(&format!("{curve}[{node_index}].db")), node.value)?;
         }
     }
     for (node_index, node) in track.tempo.iter().enumerate() {
-        check_beat(named(&format!("tempo[{node_index}].beat")), node.at)?;
-        check_tempo(named(&format!("tempo[{node_index}].bpm")), node.bpm)?;
+        check_beat(|| named(&format!("tempo[{node_index}].beat")), node.at)?;
+        check_tempo(|| named(&format!("tempo[{node_index}].bpm")), node.bpm)?;
     }
     Ok(())
 }

@@ -479,7 +479,7 @@ fn move_anchor(
         Anchor::Intro => "intro_beat",
         Anchor::Outro => "outro_beat",
     };
-    crate::mix::check_beat(format!("tracks[{index}].anchors.{field}"), to)
+    crate::mix::check_beat(|| format!("tracks[{index}].anchors.{field}"), to)
         .map_err(EditError::OutOfRange)?;
     let anchors = track.anchors;
     let (from, moved) = match anchor {
