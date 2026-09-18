@@ -56,7 +56,6 @@ fn a_track_at_the_target_with_peaks_at_the_ceiling_is_left_alone() {
 }
 
 #[test]
-#[ignore = "document-bounds"]
 fn a_measurement_that_is_not_finite_gets_no_gain() {
     // A float file can overflow the loudness meter, and a gain that is not a
     // finite number cannot be written to a document.
@@ -76,7 +75,6 @@ fn a_measurement_that_is_not_finite_gets_no_gain() {
 }
 
 #[test]
-#[ignore = "document-bounds"]
 fn the_gain_is_always_a_level_a_document_may_contain() {
     // Plus 581 LUFS is what the meter reports for samples near 1e30.
     assert_eq!(

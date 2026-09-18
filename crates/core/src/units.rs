@@ -156,9 +156,10 @@ impl Bpm {
     ///
     /// The range is what keeps a render finite. A tempo near zero makes a mix
     /// of any length, and the stretcher's start-up work grows as the tempo
-    /// falls.
+    /// falls. A tempo that is not a number fails both comparisons and so is
+    /// not valid.
     pub fn is_valid(self) -> bool {
-        self.0.is_finite() && self.0 > 0.0
+        self.0 >= Self::LOWEST.0 && self.0 <= Self::HIGHEST.0
     }
 }
 

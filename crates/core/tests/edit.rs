@@ -1332,7 +1332,6 @@ fn out_of_range_edits() -> Vec<Edit> {
 }
 
 #[test]
-#[ignore = "document-bounds"]
 fn an_edit_outside_the_limits_of_a_document_is_refused_and_changes_nothing() {
     for edit in out_of_range_edits() {
         let mut mix = two_tracks();
@@ -1347,7 +1346,6 @@ fn an_edit_outside_the_limits_of_a_document_is_refused_and_changes_nothing() {
 }
 
 #[test]
-#[ignore = "document-bounds"]
 fn two_anchor_moves_cannot_leave_a_mix_that_has_no_layout() {
     // Each of these anchors is a finite whole beat, and their difference is
     // not a finite number, so the layout of the two together would panic.
@@ -1378,7 +1376,6 @@ fn two_anchor_moves_cannot_leave_a_mix_that_has_no_layout() {
 }
 
 #[test]
-#[ignore = "document-bounds"]
 fn an_edit_that_makes_the_mix_longer_than_a_day_is_refused() {
     // 300,000 beats at 130 beats per minute is more than 38 hours, and every
     // number in the edit is within its own limit.
@@ -1482,7 +1479,6 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(1000))]
 
     #[test]
-    #[ignore = "document-bounds"]
     fn edits_at_the_limits_never_panic_and_never_leave_a_mix_the_reader_refuses(
         edits in prop::collection::vec(edits_at_the_limits(), 1..6),
     ) {
