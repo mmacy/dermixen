@@ -39,6 +39,14 @@ clap = { version = "4", features = ["derive"] }
 
 [workspace.lints.rust]
 missing_docs = "warn"
+# Only the four wrapper crates around foreign code may write unsafe code:
+# crates/signalsmith-sys, crates/aubio-sys, crates/keyfinder-sys, and
+# crates/macos-documents-sys. Each of those four crates states that allowance
+# in a [lints] table of its own, in place of this one. Forbidding unsafe code
+# here covers every other crate and every target those other crates build: the
+# library, the binaries, the integration tests, the examples, and the build
+# scripts.
+unsafe_code = "forbid"
 
 [profile.test]
 opt-level = 1
