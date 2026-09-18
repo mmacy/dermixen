@@ -20,7 +20,7 @@ blake3 = "1.8.7"
 dermixen-core.workspace = true
 hound = "3.5.1"
 mp3lame-encoder = { version = "0.2.5", optional = true, features = ["std"] }
-rubato = "4.0.0"
+rubato = "5.0.0"
 symphonia = { version = "0.6.1", default-features = false, features = ["mp3", "flac", "wav", "pcm", "aac", "isomp4"] }
 thiserror.workspace = true
 
