@@ -281,7 +281,6 @@ fn the_thread_ends_when_the_reading_is_dropped() {
 }
 
 #[test]
-#[ignore = "window-hardening-cache"]
 fn a_file_whose_bytes_are_not_the_tracks_is_never_kept_for_the_render() {
     // The file at the path is another recording than the one the document
     // names. The render takes its audio from what the reading thread kept, so

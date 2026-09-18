@@ -20,10 +20,9 @@ use dermixen_app::{
     Answer, Column, Document, Filters, Finish, GridEditor, GridScene, GridView, Intent,
     LibraryPanel, LibraryRow, MAX_LANE_PX, MIN_LANE_PX, Next, Offer, Playback, Point, Report, Scan,
     Selection, Sort, Step, TAPS_FOR_A_TEMPO, TempoField, Timeline, TransportOrder, View,
-    WheelGesture, absolute_against, arrow_step, autosave, autosave_path, forget_file, make_folder,
+    WheelGesture, absolute_here, arrow_step, autosave, autosave_path, forget_file, make_folder,
     newest_document, offered, offered_untitled, open_the_library, parse_buffer_frames,
     read_the_mix, restart_note, skipped_note, untitled_autosave_path, wheel_gesture,
-    working_folder,
 };
 use dermixen_core::{
     BeatGrid, Beats, Bpm, ContentHash, Curve, Edit, Mix, Preset, Samples, Seconds, Settings,
@@ -193,16 +192,21 @@ fn corrections_dir() -> Result<PathBuf, String> {
 /// home folder, so a user with no home folder can open a library and still
 /// be told, when a scan starts, that the music folder cannot be worked out.
 fn library_location(settings: &Settings) -> Result<PathBuf, String> {
-    if let Some(named) = named_library_file() {
+    library_location_for(named_library_file(), settings)
+}
+
+/// Which library file the window opens, given `named`, which is what the
+/// `DERMIXEN_LIBRARY_FILE` environment variable says, so that a test can
+/// give the variable's value without setting a variable for the whole
+/// process. [`library_location`] reads the variable and calls this.
+fn library_location_for(named: Option<PathBuf>, settings: &Settings) -> Result<PathBuf, String> {
+    if let Some(named) = named {
         // A relative path names one file from one folder and another file
         // from the next, and the window reports the file it opened, so the
-        // path is resolved here against the folder the window was started
+        // path is made absolute against the folder the window was started
         // in, which is what the `dermixen` command does with the same
         // variable.
-        return match named.is_absolute() {
-            true => Ok(named),
-            false => Ok(absolute_against(&working_folder()?, &named)),
-        };
+        return absolute_here(&named);
     }
     let data = dirs::data_dir().ok_or_else(|| {
         format!(
@@ -564,8 +568,11 @@ fn capitalized(message: String) -> String {
 
 /// What relinking did to a mix.
 struct Relinking {
-    /// Whether any track was pointed at a new path, which is a change to the
-    /// document that a save keeps.
+    /// Whether the pass pointed any track at a new path.
+    ///
+    /// The window works out for itself which tracks moved, by setting the
+    /// paths the pass wrote beside the paths the document under the window
+    /// has, since a person may have edited the mix while the pass ran.
     relinked: bool,
     /// What is wrong with the file of every track the window has no audio
     /// for, by content hash.
@@ -812,30 +819,25 @@ fn relink_from_the_index(index: Option<&Path>, mix: &mut Mix) -> Relinking {
     relinking
 }
 
+/// Where `mix` says each of its tracks is, by content hash. A hash that two
+/// positions of the playlist share is the same track twice, at one path.
+fn paths_by_hash(mix: &Mix) -> HashMap<ContentHash, PathBuf> {
+    mix.tracks
+        .iter()
+        .map(|track| (track.hash, track.path.clone()))
+        .collect()
+}
+
 /// The tracks of `mix` the reading thread has not been given yet, with the
-/// content hash of each of them added to `handed`.
-///
-/// A track the window has no file for is left out, since there is nothing to
-/// read: the read could only fail, and its failure would take the place of
-/// the advice in the status line to run `dermixen mix relink`. A file that is
-/// in the mix at two positions is given once, because everything the reading
-/// thread finds is keyed by content hash.
+/// content hash of each of them added to `handed`, as
+/// [`audio::to_be_read`] works them out from the hashes of the tracks the
+/// window has no file for.
 fn to_be_read(
     mix: &Mix,
     no_file: &HashMap<ContentHash, NoFile>,
     handed: &mut HashSet<ContentHash>,
 ) -> Vec<Wanted> {
-    let mut wanted = Vec::new();
-    for track in &mix.tracks {
-        if no_file.contains_key(&track.hash) || !handed.insert(track.hash) {
-            continue;
-        }
-        wanted.push(Wanted {
-            hash: track.hash,
-            path: track.path.clone(),
-        });
-    }
-    wanted
+    audio::to_be_read(mix, &no_file.keys().copied().collect(), handed)
 }
 
 /// The autosaved document the window is offering back, and the moments the
@@ -1918,10 +1920,12 @@ impl Window {
         let mut library = LibraryPanel::new(records);
         library.set_mix(timeline.mix());
 
-        // The reading thread starts with nothing to read. A track is handed
-        // to it once the pass looking for the files has said which tracks
-        // have a file to read, so that no file is read and hashed twice and
-        // a track with no file is left alone.
+        // The reading thread starts with nothing to read. Every document the
+        // window puts under itself hands its tracks to the thread in one
+        // place, which is the pass looking for the files once that pass has
+        // finished, so no file is read and hashed twice, a track with no
+        // file is left alone, and a track the pass relinks is read at the
+        // file that was found.
         let handed = HashSet::new();
         let cache = Arc::new(Mutex::new(AudioCache::default()));
         let reading = Reading::start(
@@ -2039,20 +2043,7 @@ impl Window {
         findings.extend(self.reading.findings());
         for finding in findings {
             match finding {
-                // The file the thread decoded holds other bytes than the ones
-                // the document names, which is the same thing to the window
-                // as no file at all: the lane says the file has changed in
-                // place of the waveform, the audio that was decoded is let
-                // go of rather than played, and the status line names the
-                // file.
-                Finding::Overview { hash, decoded, .. } if decoded != hash => {
-                    audio::let_go(&self.cache, hash);
-                    self.no_file.insert(hash, NoFile::Changed);
-                    if let Some(path) = self.path_of(hash) {
-                        self.message = audio::not_the_track(&path);
-                    }
-                }
-                Finding::Overview { hash, overview, .. } => {
+                Finding::Overview { hash, overview } => {
                     self.no_file.remove(&hash);
                     self.overviews.insert(hash, overview.clone());
                     self.timeline.set_overview(hash, overview);
@@ -2061,21 +2052,18 @@ impl Window {
                     self.phrases.insert(hash, phrases.clone());
                     self.timeline.set_phrases(hash, phrases);
                 }
+                // The file at the track's path holds other bytes than the
+                // ones the document names, which is the same thing to the
+                // window as no file at all: the lane says the file has
+                // changed in place of the waveform, nothing of that file was
+                // kept for the render, and the status line names the file.
+                Finding::NotTheTrack { hash, message } => {
+                    self.no_file.insert(hash, NoFile::Changed);
+                    self.message = message;
+                }
                 Finding::Trouble(problem) => self.message = problem,
             }
         }
-    }
-
-    /// The path the mix under the window gives for the track with `hash`, and
-    /// nothing when no track of that mix has that hash, which is a track
-    /// removed since the reading thread was asked for it.
-    fn path_of(&self, hash: ContentHash) -> Option<PathBuf> {
-        self.timeline
-            .mix()
-            .tracks
-            .iter()
-            .find(|track| track.hash == hash)
-            .map(|track| track.path.clone())
     }
 
     /// Starts the pass that looks for the files of `mix`'s tracks in the
@@ -2099,17 +2087,26 @@ impl Window {
     /// Takes what the pass looking for the tracks' files found, once it has
     /// finished.
     ///
-    /// A track the library placed leaves the document with a path it did not
-    /// have, so the document the pass wrote goes under the window and the mix
-    /// counts as changed, which is what makes a save keep the new path. That
-    /// happens only while the mix under the window is still the one the pass
-    /// was handed: an edit made while the pass ran outranks a path, so the
-    /// paths are left out and the status line says to open the mix again. A
-    /// pass that pointed no track at a new file changes no document at all,
-    /// which is every pass over a mix whose files are where the document says.
+    /// Each track is taken on its own, against the path the pass looked at.
+    /// A note about a file, and a path the pass found for a track, are both
+    /// about the file that track had when the pass started, so each is left
+    /// out for a track whose path under the window is no longer that one. The
+    /// notes join the notes the window already has rather than taking their
+    /// place, so a note written while the pass ran stands.
+    ///
+    /// A track the library placed is pointed at the file the library named,
+    /// in the document and in every document undo and redo reach, which adds
+    /// no step to the history and leaves the beat grid editor, the audition,
+    /// and the selection where they are. The mix then counts as changed,
+    /// which is what makes a save keep the new path, and the preview is
+    /// handed the document so that it plays the file that was found. The
+    /// editor closes when the track it was opened on is one of those tracks,
+    /// since what it shows was decoded from the file that has gone.
     ///
     /// Every track the pass found a file for is then handed to the reading
-    /// thread, which is what fills the lanes with waveforms.
+    /// thread, which is what fills the lanes with waveforms. That is the one
+    /// place tracks reach that thread, so no track is ever read at a path the
+    /// pass has since left behind.
     fn collect_the_relinking(&mut self) {
         let Some(looking) = self.looking.take() else {
             return;
@@ -2118,24 +2115,67 @@ impl Window {
             self.looking = Some(looking);
             return;
         };
-        self.no_file = found.no_file;
-        let mut message = found.message;
-        if found.relinked {
-            if *self.timeline.mix() == looking.given {
-                self.put_under_the_window(relinked);
+        let looked_at = paths_by_hash(&looking.given);
+        let here = paths_by_hash(self.timeline.mix());
+        // A track is the one the pass looked at while the mix under the
+        // window still has it at the path the pass started from.
+        let still_there =
+            |hash: &ContentHash| here.contains_key(hash) && here.get(hash) == looked_at.get(hash);
+        for (hash, note) in found.no_file {
+            if still_there(&hash) {
+                self.no_file.insert(hash, note);
+            }
+        }
+        let moved: HashMap<ContentHash, PathBuf> = paths_by_hash(&relinked)
+            .into_iter()
+            .filter(|(hash, path)| still_there(hash) && here.get(hash) != Some(path))
+            .collect();
+        if !moved.is_empty() {
+            for hash in moved.keys() {
+                // The track is at another file now, so it is neither a track
+                // with no file nor a track the reading thread has been given.
+                self.no_file.remove(hash);
+                self.handed.remove(hash);
+            }
+            self.close_the_editor_on_a_moved_track(&moved);
+            if self.timeline.set_paths(&moved) {
+                // The document now says something its file does not, so a
+                // save is what keeps the new path. Nothing is written to the
+                // autosave file for it: the pass finds the same file again
+                // the next time the mix is opened, so no work of a person's
+                // rides on it, and a write here would replace an autosave
+                // file the window is offering back at this moment. The first
+                // edit after this writes the whole document, new path and
+                // all.
                 self.document.edited();
-            } else {
-                message = say_both(
-                    &message,
-                    "The mix was edited while the window was looking, so no track was pointed at \
-                     the file that was found. Open the mix again to point them.",
-                );
+                let mix = self.timeline.mix().clone();
+                if let Some(transport) = &mut self.transport {
+                    transport.replace(mix);
+                }
             }
         }
         for want in to_be_read(self.timeline.mix(), &self.no_file, &mut self.handed) {
             self.reading.want(want);
         }
-        self.message = say_both(&self.message, &message);
+        self.message = say_both(&self.message, &found.message);
+    }
+
+    /// Closes the beat grid editor when the pass pointed its track at another
+    /// file, since the waveform the editor shows and the audio it auditions
+    /// were decoded from the file that track has left.
+    fn close_the_editor_on_a_moved_track(&mut self, moved: &HashMap<ContentHash, PathBuf>) {
+        let Some(open) = &self.editor else {
+            return;
+        };
+        if !moved.contains_key(&open.hash) {
+            return;
+        }
+        self.stop_the_audition();
+        self.editor = None;
+        self.timeline.end_grid_correction();
+        self.message =
+            "The beat grid editor was closed because its track was pointed at another file"
+                .to_owned();
     }
 
     /// Whether a scan of the music folder is running.
@@ -2667,10 +2707,13 @@ impl Window {
     /// the autosaved document means a new timeline. It is given the
     /// corrections folder and every overview and phrase record the reading
     /// thread has found so far, so the lanes are drawn as fully as they were,
-    /// and the view is fitted to the restored mix. Any track of the document
-    /// whose content hash the window has not already handed the reading
-    /// thread, and whose file the window found, is asked for, so its lane
-    /// fills in once the thread gets to it.
+    /// and the view is fitted to the restored mix.
+    ///
+    /// No track is handed to the reading thread here. The pass that looks for
+    /// the tracks' files runs over every document that comes under the window,
+    /// and the tracks go to the reading thread when that pass has finished, so
+    /// a track the pass relinks is read at the file the pass found rather than
+    /// at the path the document named before.
     fn put_under_the_window(&mut self, mix: Mix) {
         let mut timeline = Timeline::new(mix);
         if let Some(dir) = &self.corrections {
@@ -2681,9 +2724,6 @@ impl Window {
         }
         for (hash, phrases) in &self.phrases {
             timeline.set_phrases(*hash, phrases.clone());
-        }
-        for want in to_be_read(timeline.mix(), &self.no_file, &mut self.handed) {
-            self.reading.want(want);
         }
         self.timeline = timeline;
         self.stop_the_audition();
@@ -5216,13 +5256,23 @@ mod tests {
         let file = folder.join(name);
         std::fs::write(&file, bytes).expect("the audio file");
         let hash = dermixen_media::hash_file(&file).expect("the file's hash");
-        let record = TrackRecord {
+        let record = a_record(hash, &file, Bpm(140.0));
+        let index = folder.join("library.sqlite");
+        let mut open = Index::open(&index).expect("the index");
+        open.upsert(&record).expect("the record");
+        (index, hash, file)
+    }
+
+    /// A library record for the file at `path` with the given hash and
+    /// tempo, and values nothing here reads.
+    fn a_record(hash: ContentHash, path: &Path, bpm: Bpm) -> TrackRecord {
+        TrackRecord {
             hash,
-            path: file.clone(),
+            path: path.to_path_buf(),
             length: Samples(44_100),
             grid: BeatGrid {
                 first_beat: Samples::ZERO,
-                bpm: Bpm(140.0),
+                bpm,
             },
             grid_confidence: 1.0,
             grid_analyzer: "test".to_owned(),
@@ -5247,11 +5297,7 @@ mod tests {
             release: dermixen_library::Release::default(),
             phrases: None,
             loudness: None,
-        };
-        let index = folder.join("library.sqlite");
-        let mut open = Index::open(&index).expect("the index");
-        open.upsert(&record).expect("the record");
-        (index, hash, file)
+        }
     }
 
     /// A one-track mix whose track has `hash` and names `path`, which may be
@@ -5529,5 +5575,48 @@ mod tests {
     fn an_empty_tempo_field_is_named_as_empty() {
         assert_eq!(not_a_tempo(""), "The tempo field is empty");
         assert_eq!(not_a_tempo("quick"), "quick is not a tempo");
+    }
+
+    #[test]
+    fn the_panel_leaves_out_a_row_it_could_not_read_and_says_how_many() {
+        let folder = tempfile::tempdir().expect("a folder to work in");
+        let (index, _, _) = an_index_over(folder.path(), "lsd.wav", b"one track's bytes");
+        an_index_over(folder.path(), "mahadeva.wav", b"another track's bytes");
+
+        let (records, said) = library_records(Some(&index));
+        assert_eq!(records.len(), 2);
+        assert_eq!(said, "", "a library that reads whole says nothing");
+
+        // A tempo above the fastest a document holds is a value the library
+        // leaves out of a query and counts.
+        let damaged = folder.path().join("kali.wav");
+        let mut open = Index::open(&index).expect("the index");
+        open.upsert(&a_record(ContentHash([5; 32]), &damaged, Bpm(1000.0)))
+            .expect("the damaged row");
+        drop(open);
+
+        let (records, said) = library_records(Some(&index));
+        assert_eq!(records.len(), 2, "every other track is still in the panel");
+        assert!(
+            said.starts_with("1 row of the library could not be read"),
+            "{said}"
+        );
+        assert!(said.contains("Library > Scan music folder"), "{said}");
+    }
+
+    #[test]
+    fn a_relative_library_file_is_read_against_the_folder_the_window_was_started_in() {
+        let here = std::env::current_dir().expect("the folder this test runs in");
+        assert_eq!(
+            library_location_for(Some(PathBuf::from("library.sqlite")), &Settings::default())
+                .expect("a path"),
+            here.join("library.sqlite")
+        );
+        let in_full = PathBuf::from("/music/goa/library.sqlite");
+        assert_eq!(
+            library_location_for(Some(in_full.clone()), &Settings::default()).expect("a path"),
+            in_full,
+            "a path in full names the file itself"
+        );
     }
 }

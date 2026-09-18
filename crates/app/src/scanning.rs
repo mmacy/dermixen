@@ -84,28 +84,25 @@ pub fn make_folder(folder: &Path) -> std::io::Result<()> {
     builder.create(folder)
 }
 
-/// `path` as an absolute path, resolved against `folder` when it is
-/// relative, which is what the `dermixen` command does with the
-/// `DERMIXEN_LIBRARY_FILE` environment variable and with its `--library`
-/// option. The file itself need not exist.
+/// `path` as an absolute path: `path` itself when it is already absolute, and
+/// `path` below the folder the window was started in when it is not, which is
+/// what the `dermixen` command does with the `DERMIXEN_LIBRARY_FILE`
+/// environment variable and with its `--library` option. The file itself need
+/// not exist.
 ///
-/// The window reports the library file it opened, and a relative path means
-/// a different file from one folder to the next, so the window resolves the
-/// path once and holds the answer. `folder` is the folder the window was
-/// started in, which [`working_folder`] reads.
-pub fn absolute_against(folder: &Path, path: &Path) -> PathBuf {
+/// The window reports the library file it opened, and a relative path names
+/// one file from one folder and another file from the next, so the window
+/// resolves the path once and holds the answer. The folder the window was
+/// started in is read only for a path that needs it, so a path in full still
+/// works where that folder has gone.
+pub fn absolute_here(path: &Path) -> Result<PathBuf, String> {
     if path.is_absolute() {
-        return path.to_path_buf();
+        return Ok(path.to_path_buf());
     }
-    folder.join(path)
-}
-
-/// The folder the window was started in, which a relative library file is
-/// resolved against.
-pub fn working_folder() -> Result<PathBuf, String> {
-    std::env::current_dir().map_err(|problem| {
+    let here = std::env::current_dir().map_err(|problem| {
         format!("The folder this window was started in cannot be read: {problem}")
-    })
+    })?;
+    Ok(here.join(path))
 }
 
 /// A scan of one folder into one library file, running on its own thread.

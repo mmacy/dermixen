@@ -939,6 +939,22 @@ impl History {
         true
     }
 
+    /// Runs `change` over the document and over every document undo and redo
+    /// can reach, and records no step.
+    ///
+    /// A track's path is where its file is rather than something a person
+    /// chose, so pointing a track at the file it has moved to is no step for
+    /// undo to take back, and a path left behind in an older document would
+    /// come back with the next undo. The window relinks a track this way.
+    /// Every change a person makes goes through [`apply`](History::apply)
+    /// instead, which records a step.
+    pub fn for_each_mix(&mut self, mut change: impl FnMut(&mut Mix)) {
+        change(&mut self.mix);
+        for mix in self.past.iter_mut().chain(self.future.iter_mut()) {
+            change(mix);
+        }
+    }
+
     /// Whether [`undo`](History::undo) would do anything.
     pub fn can_undo(&self) -> bool {
         !self.past.is_empty()

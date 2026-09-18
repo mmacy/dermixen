@@ -33,7 +33,7 @@ pub use grid::{
 };
 pub use library::{Column, Filters, LibraryPanel, LibraryRow, Sort, skipped_note};
 pub use playback::{Playback, PlaybackState, TransportOrder, restart_note};
-pub use scanning::{Report, Scan, absolute_against, make_folder, open_the_library, working_folder};
+pub use scanning::{Report, Scan, absolute_here, make_folder, open_the_library};
 pub use timeline::{
     AnchorMark, DEFAULT_TEMPO, EDGE_PX, HIT_PX, Lane, MAX_LANE_PX, MIN_BAR_PX, MIN_LANE_PX,
     NodeMark, PhraseMark, Point, REACH_MARGIN, Scene, Selection, TEMPO_MARGIN, TempoLane,

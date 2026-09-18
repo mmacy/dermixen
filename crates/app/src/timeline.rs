@@ -2120,6 +2120,35 @@ impl Timeline {
     pub fn take_correction_failure(&mut self) -> Option<String> {
         self.failure.take()
     }
+
+    /// Points every track whose content hash is a key of `moved` at the path
+    /// that key gives, and says whether any track's path changed.
+    ///
+    /// The path is changed in the document and in every document undo and
+    /// redo reach, and no step is added to the history: undo and redo go on
+    /// taking back the edits they took back before, and each document they
+    /// reach names the new path. A path is where a track's file is rather
+    /// than something a person chose, so an undo that put the old path back
+    /// would take the window to a file that is not there.
+    ///
+    /// The window calls this when the pass that looks for the tracks' files
+    /// finds a track's file somewhere else. Nothing else about the document
+    /// changes, so the selection, the view, the lane heights, and a grid
+    /// correction in progress all stand.
+    pub fn set_paths(&mut self, moved: &HashMap<ContentHash, PathBuf>) -> bool {
+        let mut changed = false;
+        self.history.for_each_mix(|mix| {
+            for track in &mut mix.tracks {
+                if let Some(path) = moved.get(&track.hash)
+                    && track.path != *path
+                {
+                    track.path = path.clone();
+                    changed = true;
+                }
+            }
+        });
+        changed
+    }
 }
 
 /// The columns of a track's bar lines within the view.

@@ -1,17 +1,20 @@
 //! Tests for the rules that keep the window inside the document limits and
 //! on the shared file helpers: the comparison of a decoded file's hash with
-//! the document's, what the library panel says about a row it could not read,
-//! where a relative library path lands, who may enter a folder the window
-//! makes, and what the status line says about a document the transport
-//! refused.
+//! the document's, which tracks reach the thread that reads them, what a
+//! relink does to the history, who may enter a folder the window makes, and
+//! what the status line says about a document the transport refused.
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use dermixen_app::audio::{AudioCache, Decoding, Finding, Reading, Wanted, not_the_track};
-use dermixen_app::{absolute_against, make_folder, restart_note, skipped_note};
-use dermixen_core::{ContentHash, Samples};
+use dermixen_app::audio::{AudioCache, Decoding, Wanted, not_the_track, to_be_read};
+use dermixen_app::{Timeline, make_folder, restart_note};
+use dermixen_core::{
+    Anchors, BeatGrid, Beats, Bpm, ContentHash, Decibels, Edit, Envelope, EqEnvelopes, Mix,
+    Samples, Track,
+};
 use dermixen_engine::{TransportState, TransportStatus};
 
 /// How long a test waits for a thread. The fixtures decode in well under a
@@ -39,6 +42,30 @@ fn wait_for(decoding: &Decoding) -> Result<Arc<dermixen_media::Audio>, String> {
         }
         assert!(Instant::now() < deadline, "the file was still being read");
         std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// A one-track mix whose track has `hash` and names `path`.
+fn a_mix(hash: ContentHash, path: &Path) -> Mix {
+    Mix {
+        tracks: vec![Track {
+            path: path.to_path_buf(),
+            hash,
+            length: Samples(44_100),
+            grid: BeatGrid {
+                first_beat: Samples::ZERO,
+                bpm: Bpm(140.0),
+            },
+            anchors: Anchors {
+                intro: Beats(0.0),
+                outro: Beats(16.0),
+            },
+            keylock: true,
+            gain: Decibels::UNITY,
+            volume: Envelope::new(),
+            eq: EqEnvelopes::default(),
+            tempo: Vec::new(),
+        }],
     }
 }
 
@@ -74,73 +101,81 @@ fn a_file_whose_bytes_are_not_the_tracks_is_refused_by_the_path_that_names_it() 
 }
 
 #[test]
-fn the_reading_thread_reports_the_hash_of_the_bytes_it_decoded() {
-    let path = fixture("sine-440-44k.wav");
-    let hash = dermixen_media::hash_file(&path).expect("the fixture's hash");
-    // The thread is asked for another track's bytes at that path, which is
-    // what the window compares: the hash it asked for against the hash of
-    // what came back.
-    let asked = ContentHash([9; 32]);
-    let reading = Reading::start(
+fn a_track_the_pass_relinks_is_read_at_its_new_path_and_only_once() {
+    let hash = ContentHash([3; 32]);
+    let gone = PathBuf::from("/music/goa/gone/lsd.mp3");
+    let found = PathBuf::from("/music/goa/kept/lsd.mp3");
+    let mut handed = HashSet::new();
+
+    // While the pass has not placed the track, the window has no file for it
+    // and hands the reading thread nothing, so nothing is read at the path
+    // the document named.
+    let with_no_file = HashSet::from([hash]);
+    assert!(to_be_read(&a_mix(hash, &gone), &with_no_file, &mut handed).is_empty());
+    assert!(handed.is_empty(), "a track with no file is not recorded");
+
+    // The pass found the file, so the track is handed over at the path the
+    // pass wrote, once.
+    let relinked = a_mix(hash, &found);
+    assert_eq!(
+        to_be_read(&relinked, &HashSet::new(), &mut handed),
         vec![Wanted {
-            hash: asked,
-            path: path.clone(),
-        }],
-        None,
-        cache(),
-        || {},
+            hash,
+            path: found.clone()
+        }]
     );
-    let deadline = Instant::now() + PATIENCE;
-    loop {
-        for finding in reading.findings() {
-            if let Finding::Overview {
-                hash: named,
-                decoded,
-                ..
-            } = finding
-            {
-                assert_eq!(named, asked, "the finding is keyed by what was asked for");
-                assert_eq!(decoded, hash, "the bytes that were decoded are the file's");
-                return;
-            }
-        }
-        assert!(Instant::now() < deadline, "the thread sent no overview");
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    assert!(
+        to_be_read(&relinked, &HashSet::new(), &mut handed).is_empty(),
+        "a track already handed to the thread is not handed again"
+    );
+
+    // One file at two positions of the playlist is read once.
+    let twice = Mix {
+        tracks: vec![relinked.tracks[0].clone(), relinked.tracks[0].clone()],
+    };
+    let mut fresh = HashSet::new();
+    assert_eq!(to_be_read(&twice, &HashSet::new(), &mut fresh).len(), 1);
 }
 
 #[test]
-fn the_panel_says_how_many_rows_it_could_not_read_and_what_puts_them_back() {
-    assert_eq!(skipped_note(0), "");
-    let one = skipped_note(1);
-    assert!(
-        one.starts_with("1 row of the library could not be read"),
-        "{one}"
-    );
-    assert!(one.contains("Library > Scan music folder"), "{one}");
-    let many = skipped_note(4);
-    assert!(
-        many.starts_with("4 rows of the library could not be read"),
-        "{many}"
-    );
-    assert!(many.contains("Library > Scan music folder"), "{many}");
-}
+fn pointing_a_track_at_another_file_leaves_the_history_where_it_was() {
+    let hash = ContentHash([4; 32]);
+    let gone = PathBuf::from("/music/goa/gone/lsd.mp3");
+    let found = PathBuf::from("/music/goa/kept/lsd.mp3");
+    let mut timeline = Timeline::new(a_mix(hash, &gone));
+    timeline
+        .apply(Edit::SetKeylock {
+            track: 0,
+            keylock: false,
+        })
+        .expect("the track is in the playlist");
 
-#[test]
-fn a_relative_library_file_is_read_against_the_folder_the_window_was_started_in() {
-    let here = Path::new("/music/sets");
+    let moved = HashMap::from([(hash, found.clone())]);
+    assert!(timeline.set_paths(&moved));
+    assert_eq!(timeline.mix().tracks[0].path, found);
+    assert!(!timeline.mix().tracks[0].keylock);
+
+    // The relink is no step of its own: the undo takes back the keylock, and
+    // the document it takes the window to names the file that was found.
+    assert!(timeline.can_undo());
+    assert!(timeline.undo());
+    assert!(timeline.mix().tracks[0].keylock);
     assert_eq!(
-        absolute_against(here, Path::new("library.sqlite")),
-        PathBuf::from("/music/sets/library.sqlite")
+        timeline.mix().tracks[0].path,
+        found,
+        "the path the pass found stands through an undo"
     );
-    assert_eq!(
-        absolute_against(here, Path::new("below/library.sqlite")),
-        PathBuf::from("/music/sets/below/library.sqlite")
+    assert!(timeline.redo());
+    assert_eq!(timeline.mix().tracks[0].path, found);
+    assert!(!timeline.mix().tracks[0].keylock);
+
+    assert!(
+        !timeline.set_paths(&moved),
+        "a track already at that path is no change"
     );
-    assert_eq!(
-        absolute_against(here, Path::new("/elsewhere/library.sqlite")),
-        PathBuf::from("/elsewhere/library.sqlite"),
-        "a path in full names the file itself"
+    assert!(
+        !timeline.set_paths(&HashMap::from([(ContentHash([9; 32]), gone)])),
+        "a hash the mix does not hold changes nothing"
     );
 }
 

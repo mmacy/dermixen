@@ -13,7 +13,9 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, TryIter, TryRecvError, channel};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use dermixen_core::{ContentHash, Samples, Seconds, Track};
+use std::collections::HashSet;
+
+use dermixen_core::{ContentHash, Mix, Samples, Seconds, Track};
 use dermixen_engine::{Output, Resampler, SendLoader, SendStretchers, Source, TimeStretcher};
 use dermixen_library::{Index, PhraseRecord};
 use dermixen_media::{Audio, Decoded, Frame, Overview, decode};
@@ -103,11 +105,6 @@ impl AudioCache {
         self.let_one_go();
     }
 
-    /// Lets go of the track kept under `hash`, if one is kept there.
-    fn forget(&mut self, hash: ContentHash) {
-        self.kept.retain(|kept| kept.hash != hash);
-    }
-
     /// Keeps a track the reading thread has decoded, while there is room for
     /// it, ranked below every track the render has asked for.
     fn read_ahead(&mut self, hash: ContentHash, audio: Arc<Audio>) {
@@ -158,18 +155,6 @@ pub fn kept(cache: &Mutex<AudioCache>, hash: ContentHash) -> Option<Arc<Audio>> 
     shared(cache).heard(hash)
 }
 
-/// Lets go of the audio kept under `hash`, if any is kept there.
-///
-/// The window calls this for a track whose file holds other bytes than the
-/// document names, which the reading thread decoded before anything had
-/// compared the two hashes. The audio of another recording would otherwise
-/// answer the render's next call for that track, since the store is keyed by
-/// the hash the caller asked for. The render decodes the file again for a
-/// track whose audio nothing keeps, and that decode compares the hashes.
-pub fn let_go(cache: &Mutex<AudioCache>, hash: ContentHash) {
-    shared(cache).forget(hash);
-}
-
 /// What the window says about a file whose bytes are not the track's.
 ///
 /// A mix document names a track by the hash of its file's bytes, and
@@ -186,18 +171,29 @@ pub fn not_the_track(path: &Path) -> String {
     )
 }
 
-/// Decodes the file at `path` and hands back its audio only when the bytes
-/// that were decoded are the track with `hash`.
+/// Decodes the file at `path` and hands back what was decoded only when its
+/// bytes are the track with `hash`.
 ///
 /// Every decode the window makes goes through this, so a file swapped for
 /// another one since the document was written is reported by
-/// [`not_the_track`] rather than drawn on the lane and played.
-fn decoded_track(hash: ContentHash, path: &Path) -> Result<Decoded, String> {
-    let decoded = decode(path).map_err(|problem| problem.to_string())?;
+/// [`not_the_track`] rather than drawn on the lane, kept for the render, and
+/// played.
+fn decoded_track(hash: ContentHash, path: &Path) -> Result<Decoded, NotDecoded> {
+    let decoded = decode(path).map_err(|problem| NotDecoded::Unreadable(format!("{problem}")))?;
     if decoded.hash != hash {
-        return Err(not_the_track(path));
+        return Err(NotDecoded::NotTheTrack);
     }
     Ok(decoded)
+}
+
+/// Why a file was not taken as a track's audio.
+enum NotDecoded {
+    /// The file could not be opened, read, or decoded, with the reason the
+    /// media crate gave.
+    Unreadable(String),
+    /// The file was decoded, and its bytes are not the track's, so what was
+    /// decoded is thrown away. [`not_the_track`] says it in words.
+    NotTheTrack,
 }
 
 /// The audio of a track, from the store when it is there and from the file
@@ -210,7 +206,10 @@ fn audio_of(
     if let Some(audio) = shared(cache).heard(hash) {
         return Ok(audio);
     }
-    let decoded = decoded_track(hash, path)?;
+    let decoded = decoded_track(hash, path).map_err(|problem| match problem {
+        NotDecoded::Unreadable(reason) => reason,
+        NotDecoded::NotTheTrack => not_the_track(path),
+    })?;
     let audio = Arc::new(decoded.audio);
     shared(cache).keep(hash, Arc::clone(&audio));
     Ok(audio)
@@ -350,18 +349,25 @@ pub fn output(_buffer_frames: Option<NonZeroU32>) -> Result<Box<dyn Output>, Str
 
 /// Something the reading thread finished and the window paints or reports.
 pub enum Finding {
-    /// A track's waveform overview, which the window hands the timeline.
+    /// A track's waveform overview, which the window hands the timeline. The
+    /// bytes it was worked out from are the track's, since the thread
+    /// compares the hash of what it decoded with the hash it was asked for.
     Overview {
-        /// The track's content hash, as the mix document names it, which is
-        /// what the thread was asked for.
+        /// The track's content hash.
         hash: ContentHash,
-        /// The hash of the bytes the thread decoded. It differs from `hash`
-        /// when the file at the track's path is not the track the document
-        /// names, which the window reports with [`not_the_track`] and shows
-        /// on the lane in place of the waveform.
-        decoded: ContentHash,
         /// Its waveform overview.
         overview: Overview,
+    },
+    /// The file at the track's path is not the track the document names,
+    /// because the bytes that were decoded hash to something else. Nothing
+    /// was kept for the render, and the window puts the note on the track's
+    /// lane in place of a waveform.
+    NotTheTrack {
+        /// The track's content hash, as the document names it.
+        hash: ContentHash,
+        /// What the status line says about the file, from
+        /// [`not_the_track`].
+        message: String,
     },
     /// A track's phrase analysis as the library has it.
     Phrases {
@@ -376,6 +382,40 @@ pub enum Finding {
         /// What went wrong, in words.
         String,
     ),
+}
+
+/// The tracks of `mix` the reading thread has not been given yet, with the
+/// content hash of each of them added to `handed`.
+///
+/// This is the one rule for what reaches the reading thread. A track whose
+/// hash is in `with_no_file`, which is every track the window has no file
+/// for, is left out, since there is nothing to read: the read could only
+/// fail, and its failure would take the place of the advice in the status
+/// line to run `dermixen mix relink`. A track already in `handed` is left
+/// out, so a file that is in the mix at two positions is read once and a
+/// track read for one document is not read again for the next, since
+/// everything the reading thread finds is keyed by content hash.
+///
+/// The window asks this only after the pass that looks for the tracks' files
+/// has finished, for every document it puts under itself, because a track the
+/// pass relinks is to be read at the file the pass found rather than at the
+/// path the document named before.
+pub fn to_be_read(
+    mix: &Mix,
+    with_no_file: &HashSet<ContentHash>,
+    handed: &mut HashSet<ContentHash>,
+) -> Vec<Wanted> {
+    let mut wanted = Vec::new();
+    for track in &mix.tracks {
+        if with_no_file.contains(&track.hash) || !handed.insert(track.hash) {
+            continue;
+        }
+        wanted.push(Wanted {
+            hash: track.hash,
+            path: track.path.clone(),
+        });
+    }
+    wanted
 }
 
 /// One track for the reading thread to work on.
@@ -536,26 +576,28 @@ fn phrases_for(index: &Index, track: &Wanted) -> Option<Finding> {
 
 /// Decodes one track, working out its waveform overview and keeping its
 /// audio in `cache` as a read-ahead, or reporting the file by path when it
-/// cannot be read.
+/// cannot be read or is not the track the document names.
 ///
-/// The hash of the bytes that were decoded goes with the overview, so the
-/// window can see that the file at the track's path is not the track the
-/// document names. The audio is kept under the hash the thread was asked for,
-/// which is how the render finds it, and the window lets go of the audio of a
-/// track whose bytes were not the document's with [`let_go`].
+/// The hash of the bytes that were decoded is compared with the hash the
+/// thread was asked for before anything is kept, so the audio the store holds
+/// under a track's hash is always the audio of that track. The render takes
+/// its audio from the store, and a store that never holds another recording
+/// is what keeps the render from playing one.
 fn decode_finding(track: &Wanted, cache: &Mutex<AudioCache>) -> Finding {
-    match decode(&track.path) {
+    match decoded_track(track.hash, &track.path) {
         Ok(decoded) => {
             let overview = Overview::of(&decoded.audio, OVERVIEW_BUCKET);
-            let hash = decoded.hash;
             shared(cache).read_ahead(track.hash, Arc::new(decoded.audio));
             Finding::Overview {
                 hash: track.hash,
-                decoded: hash,
                 overview,
             }
         }
-        Err(problem) => Finding::Trouble(format!(
+        Err(NotDecoded::NotTheTrack) => Finding::NotTheTrack {
+            hash: track.hash,
+            message: not_the_track(&track.path),
+        },
+        Err(NotDecoded::Unreadable(problem)) => Finding::Trouble(format!(
             "{} could not be read: {problem}",
             track.path.display()
         )),
