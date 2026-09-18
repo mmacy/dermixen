@@ -283,8 +283,14 @@ fn a_path_that_names_a_device_is_an_error_at_once() {
     symlink("/dev/zero", dir.join("zero.txt")).unwrap();
     symlink("/dev/zero", dir.join("zero.toml")).unwrap();
     let text = fs::read_to_string(dir.join("set.dmx")).unwrap();
-    let device = text.replacen(dir.join("a.wav").to_str().unwrap(), "/dev/zero", 1);
-    assert_ne!(device, text, "the document names a.wav by its full path");
+    // The document holds the track's path with every link resolved, and on
+    // macOS a scratch folder is reached through one.
+    let track = fs::canonicalize(dir.join("a.wav")).unwrap();
+    let device = text.replacen(&format!("\"{}\"", track.display()), "\"/dev/zero\"", 1);
+    assert!(
+        device.contains("\"path\": \"/dev/zero\""),
+        "the document names a.wav by its full path: {text}"
+    );
     fs::write(dir.join("device.dmx"), &device).unwrap();
 
     for arguments in [
