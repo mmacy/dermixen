@@ -259,7 +259,6 @@ fn the_settings_file_is_read_with_a_limit_and_written_atomically() {
 }
 
 #[test]
-#[ignore = "file-helpers-links"]
 fn a_destination_that_is_a_link_keeps_the_link_and_replaces_its_target() {
     // A person who keeps a settings file or a mix document in another folder
     // and links to it gets the new contents where the link points.

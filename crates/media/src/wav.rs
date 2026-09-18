@@ -28,9 +28,11 @@ pub struct WavError {
 
 /// How many bytes [`WavFile::capacity`] keeps back for the header.
 ///
-/// A WAV file states the size of its audio and the size of the whole file as
-/// 32-bit numbers, so the two sizes together stay under 4 GiB. The header
-/// hound writes is 44 bytes, and this leaves room for a longer one.
+/// A WAV file states the size of the whole file as a 32-bit number, so a whole
+/// file is at most `u32::MAX` bytes, which is 4 GiB less one. The header that
+/// hound, the crate this module writes WAV files through, puts at the front is
+/// 44 bytes. Keeping back 128 leaves room for a longer header than hound
+/// writes today.
 const HEADER_ROOM: u32 = 128;
 
 /// The WAV spec for stereo audio at the internal sample rate, at the given depth.
@@ -148,9 +150,9 @@ impl WavFile {
         })
     }
 
-    /// The most frames a WAV file of this depth can hold. A WAV file states
-    /// the size of its audio in 32 bits, so the audio and the header together
-    /// stay under 4 GiB.
+    /// The most frames a WAV file of this depth can hold, which is what fits
+    /// in `u32::MAX` bytes after [`HEADER_ROOM`] bytes of header. At sixteen
+    /// bits that is about six hours and forty-five minutes.
     pub fn capacity(depth: WavDepth) -> dermixen_core::Samples {
         let bytes_per_frame = match depth {
             WavDepth::Int16 => 4,

@@ -1,21 +1,31 @@
 #!/usr/bin/env python3
 """Writes a valid stereo FLAC file of digital silence of any length.
 
-Usage: python3 tools/make_long_flac.py <minutes> <output.flac> [--no-total]
+Usage: python3 tools/make_long_flac.py <minutes> <output.flac> [--no-total] [--rate HZ]
 
 Each FLAC frame is a constant subframe of 17 to 19 bytes that decodes to
 65,535 stereo frames, so 91 minutes of audio is about 65 KB. The decoder tests
 use such a file to show that a track over the length limit is refused without
 being decoded. With --no-total the header states no total length, so a decoder
-learns the length only by decoding. Standard library only.
+learns the length only by decoding.
+
+--rate writes the file at another sample rate, which is what shows how much
+memory a decode of a high-rate file takes. FLAC's frame header has a code for
+44,100 Hz and none for most other rates, so at any other rate the frame header
+carries code 0, which tells a decoder to read the rate from the stream header
+instead. Standard library only.
 """
 import struct
 import sys
 
 minutes = float(sys.argv[1])
-NO_TOTAL = "--no-total" in sys.argv[3:]
+options = sys.argv[3:]
+NO_TOTAL = "--no-total" in options
+RATE = int(options[options.index("--rate") + 1]) if "--rate" in options else 44100
 BLOCK = 65535
-RATE = 44100
+# The four bits of the frame header that name the sample rate. Code 9 is
+# 44,100 Hz, and code 0 sends the decoder to the stream header for the rate.
+RATE_CODE = 9 if RATE == 44100 else 0
 frames = int(minutes * 60 * RATE) // BLOCK
 total = frames * BLOCK
 
@@ -46,7 +56,7 @@ packed = (RATE << 44) | (1 << 41) | (15 << 36) | (0 if NO_TOTAL else total)
 info += packed.to_bytes(8, "big") + b"\0" * 16
 out = bytearray(b"fLaC" + b"\x80" + len(info).to_bytes(3, "big") + info)
 for n in range(frames):
-    header = b"\xff\xf8" + b"\x79" + b"\x18" + utf8(n) + struct.pack(">H", BLOCK - 1)
+    header = b"\xff\xf8" + bytes([0x70 | RATE_CODE]) + b"\x18" + utf8(n) + struct.pack(">H", BLOCK - 1)
     header += bytes([crc(header, 0x07, 8)])
     body = header + b"\x00\x00\x00" + b"\x00\x00\x00"
     out += body + struct.pack(">H", crc(body, 0x8005, 16))

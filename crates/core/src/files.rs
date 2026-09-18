@@ -32,6 +32,10 @@ const NAME_ATTEMPTS: u32 = 16;
 /// macOS and Linux.
 const LONGEST_INCLUDED_NAME: usize = 120;
 
+/// How many symbolic links [`AtomicFile::create`] follows from its destination
+/// before it stops. The operating system itself stops at about this many.
+const LINKS_FOLLOWED: u32 = 32;
+
 /// Why a file was not read.
 #[derive(Debug, thiserror::Error)]
 pub enum ReadError {
@@ -141,11 +145,18 @@ pub fn read_text(path: &Path, limit: u64) -> Result<String, ReadError> {
 /// destination in one step when [`AtomicFile::commit`] is called and is
 /// removed when it is dropped without that call.
 ///
-/// The temporary file is in the destination's folder, is created only if
-/// nothing has its name, and has a name nobody can predict, so a symbolic
-/// link planted in the folder is never written through. A destination that
-/// exists keeps its permissions. A new file gets the permissions the caller
-/// asked for.
+/// A destination that is a symbolic link is followed, so the write replaces
+/// the file the link points at and the link itself stays. A person who keeps
+/// a mix document or a settings file in another folder and links to it gets
+/// the new contents where the link points. A link whose target is not there
+/// yet gets its target made.
+///
+/// The temporary file is in the folder of the file being replaced, is created
+/// only if nothing has its name, and has a name nobody can predict. A
+/// symbolic link planted at the temporary name is therefore never written
+/// through, which is the name a person never chose and cannot check. A
+/// destination that exists keeps its permissions. A new file gets the
+/// permissions the caller asked for.
 #[derive(Debug)]
 pub struct AtomicFile {
     /// The open temporary file.
@@ -171,14 +182,15 @@ impl AtomicFile {
     /// yet: read and write for the owner alone when it is true, and the
     /// process's default when it is false.
     pub fn create(destination: &Path, private: bool) -> std::io::Result<AtomicFile> {
+        let destination = through_links(destination);
         let Some(name) = destination.file_name() else {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("{} does not name a file", destination.display()),
             ));
         };
-        let folder = folder_of(destination);
-        let kept_permissions = std::fs::metadata(destination)
+        let folder = folder_of(&destination);
+        let kept_permissions = std::fs::metadata(&destination)
             .ok()
             .map(|data| data.permissions());
 
@@ -189,7 +201,7 @@ impl AtomicFile {
                     return Ok(AtomicFile {
                         file,
                         temporary,
-                        destination: destination.to_path_buf(),
+                        destination: destination.clone(),
                         kept_permissions,
                         committed: false,
                     });
@@ -250,6 +262,31 @@ pub fn write_atomically(destination: &Path, private: bool, bytes: &[u8]) -> std:
     writing.commit()
 }
 
+/// The file `destination` names: `destination` itself, or the file at the end
+/// of the chain of symbolic links that starts there.
+///
+/// A relative link target is read against the folder the link is in, which is
+/// how the operating system reads one. A chain that runs longer than
+/// [`LINKS_FOLLOWED`], which is the case of a link that points back at itself,
+/// ends where the counting stops, and the write then fails on that path rather
+/// than looping.
+fn through_links(destination: &Path) -> PathBuf {
+    let mut path = destination.to_path_buf();
+    for _ in 0..LINKS_FOLLOWED {
+        // A path that is not a symbolic link, and a path with nothing at it,
+        // are both the end of the chain.
+        let Ok(target) = std::fs::read_link(&path) else {
+            return path;
+        };
+        path = if target.is_absolute() {
+            target
+        } else {
+            folder_of(&path).join(target)
+        };
+    }
+    path
+}
+
 /// The folder `path` is in, as a path a file can be made in. A path with no
 /// folder in it is in the folder the process is running in.
 fn folder_of(path: &Path) -> &Path {
@@ -305,11 +342,11 @@ fn temporary_name(destination_name: &OsStr) -> OsString {
 /// A number another process cannot guess, drawn afresh on every call.
 ///
 /// The standard library keys each [`RandomState`] with a random value the
-/// operating system gave this process and a counter it bumps on every call,
-/// so hashing anything at all through a fresh `RandomState` gives a number
-/// that differs from call to call and from run to run. The clock, the process
-/// id, and a counter of this process's own writes go through it, so that two
-/// writes a moment apart cannot land on one name.
+/// operating system gave this process, and bumps that key on every call, so
+/// hashing anything at all through a fresh `RandomState` gives a number that
+/// differs from call to call and from run to run. The clock, the process id,
+/// and a counter of this process's own writes go through the hasher, so that
+/// two writes a moment apart cannot land on one name.
 fn unpredictable() -> u64 {
     /// How many names this process has drawn.
     static DRAWN: AtomicU64 = AtomicU64::new(0);

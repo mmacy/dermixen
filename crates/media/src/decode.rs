@@ -8,7 +8,7 @@ use dermixen_core::files::open_regular;
 use dermixen_core::{ContentHash, LONGEST_TRACK, SAMPLE_RATE};
 use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{
-    Async, FixedAsync, Resampler, SincInterpolationParameters, SincInterpolationType,
+    Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters, SincInterpolationType,
     WindowFunction,
 };
 use symphonia::core::codecs::CodecParameters;
@@ -100,11 +100,6 @@ pub fn decode(path: &Path) -> Result<Decoded, DecodeError> {
     let hash = ContentHash(*blake3::hash(&bytes).as_bytes());
 
     let (frames, source_sample_rate, source_channels) = decode_without_panicking(path, bytes)?;
-    let frames = if source_sample_rate == SAMPLE_RATE {
-        frames
-    } else {
-        resample(path, frames, source_sample_rate)?
-    };
 
     Ok(Decoded {
         audio: Audio { frames },
@@ -152,11 +147,15 @@ fn read_whole_file(path: &Path) -> Result<Vec<u8>, DecodeError> {
 /// Decodes the whole file, and reports a panic from the decoding library as a
 /// damaged file.
 ///
-/// Two headers reach arithmetic in symphonia 0.6.1 that overflows: a WAV file
-/// that states 32,770 channels or more, and an MP4 file whose `stts` box
-/// states 4,294,967,295 samples. A debug build of symphonia panics on the
-/// overflow and prints the panic to the standard error. Catching the panic
-/// here is what keeps one such file from ending a library scan or a render.
+/// A WAV file that states 32,770 channels or more reaches arithmetic in
+/// symphonia 0.6.1 that overflows, and a debug build of symphonia panics on
+/// the overflow and prints the panic to the standard error. The fixture
+/// `tests/fixtures/audio/wav-65535-channels.wav` states 65,535 channels and is
+/// what the test for that panic decodes. Catching the panic here is what keeps
+/// such a file from ending a library scan or a render.
+///
+/// The panic depends on unwinding, so no build profile in the workspace may
+/// set `panic = "abort"`. The root `Cargo.toml` says so beside the profiles.
 fn decode_without_panicking(
     path: &Path,
     bytes: Vec<u8>,
@@ -203,11 +202,13 @@ fn audio_start(bytes: &[u8]) -> usize {
     if start <= bytes.len() { start } else { 0 }
 }
 
-/// Decodes the whole file to stereo frames at the rate the file was stored
-/// at, and reports that rate and the channel count the file held.
+/// Decodes the whole file to stereo frames at the internal sample rate, and
+/// reports the rate and the channel count the file itself held.
 ///
-/// The frames are built packet by packet, so the decoded audio is held once
-/// rather than as interleaved samples and as frames at the same time.
+/// The frames are built packet by packet, and a file at another rate goes
+/// through the resampler a block at a time as its packets arrive, so the
+/// memory a decode takes follows the length of the audio at the internal rate
+/// however high a rate the file states.
 ///
 /// The file's bytes are handed over rather than borrowed because the decoder
 /// reads from them for as long as it runs.
@@ -271,13 +272,10 @@ fn decode_samples(path: &Path, bytes: Vec<u8>) -> Result<(Vec<Frame>, u32, u16),
         .make_audio_decoder(&parameters, &decoder_options)
         .map_err(|error| from_symphonia(path, error))?;
 
-    let mut frames: Vec<Frame> = Vec::new();
+    let mut collector: Option<Collector> = None;
     let mut packet_samples: Vec<f32> = Vec::new();
     let mut source: Option<(u32, u16)> = None;
     let mut packets_seen = false;
-    // How many frames at the rate the file is stored at are as long as a
-    // track may be. The first packet that names a rate sets it.
-    let mut longest = u64::MAX;
     loop {
         let packet = match reader.next_packet() {
             Ok(Some(packet)) => packet,
@@ -309,36 +307,27 @@ fn decode_samples(path: &Path, bytes: Vec<u8>) -> Result<(Vec<Frame>, u32, u16),
         let rate = buffer.spec().rate();
         if source.map(|(seen, _)| seen) != Some(rate) {
             check_rate(path, rate)?;
-            longest = longest_at(rate);
+        }
+        if collector.is_none() {
+            collector = Some(Collector::start(path, rate)?);
         }
         source = Some((rate, channels));
 
         buffer.copy_to_vec_interleaved(&mut packet_samples);
-        // The length is measured on every packet, so a file longer than a
-        // track may be is refused as soon as its packets pass that length
-        // rather than after the rest of the file is decoded.
-        let more = packet_samples.len() / usize::from(channels);
-        if frames.len() as u64 + more as u64 > longest {
-            return Err(too_long(path));
-        }
-        make_room(&mut frames, more, longest);
-        if channels == 1 {
-            frames.extend(packet_samples.iter().map(|sample| {
-                let sample = within_the_limit(*sample);
-                [sample, sample]
-            }));
-        } else {
-            frames.extend(
-                packet_samples
-                    .as_chunks::<2>()
-                    .0
-                    .iter()
-                    .map(|frame| [within_the_limit(frame[0]), within_the_limit(frame[1])]),
-            );
+        // Every packet goes into the collector as it is decoded, and the
+        // collector measures what it holds at the internal rate, so a file
+        // longer than a track may be is refused as soon as its packets pass
+        // that length rather than after the rest of the file is decoded.
+        if let Some(collecting) = collector.as_mut() {
+            collecting.push(path, &packet_samples, channels)?;
         }
     }
 
     if let Some((rate, channels)) = source {
+        let frames = match collector {
+            Some(collecting) => collecting.finish(path)?,
+            None => Vec::new(),
+        };
         return Ok((frames, rate, channels));
     }
     if packets_seen {
@@ -368,9 +357,9 @@ fn decode_samples(path: &Path, bytes: Vec<u8>) -> Result<(Vec<Frame>, u32, u16),
 /// [`HIGHEST_SOURCE_RATE`] and refuses any other.
 ///
 /// The resampler works out how much room its output needs from the two rates,
-/// so a file that states one hertz asks it for tens of thousands of samples
-/// for every sample the file holds. Reading the rate first is what keeps that
-/// from happening.
+/// so for a file that states one hertz the resampler asks for tens of
+/// thousands of samples of room for every sample the file holds. Reading the
+/// rate first is what keeps that from happening.
 fn check_rate(path: &Path, rate: u32) -> Result<(), DecodeError> {
     if (LOWEST_SOURCE_RATE..=HIGHEST_SOURCE_RATE).contains(&rate) {
         return Ok(());
@@ -445,55 +434,270 @@ fn stereo_or_fewer(path: &Path, channels: usize) -> Result<u16, DecodeError> {
     Ok(channels as u16)
 }
 
-/// Resamples stereo frames from `rate` to the internal sample rate.
+/// How many frames of a file the resampler takes in one call.
+const RESAMPLE_BLOCK: usize = 1024;
+
+/// Where the decoded packets go on their way to the internal sample rate.
+///
+/// A file already at the internal rate has its frames kept as they are. A file
+/// at another rate has each block of its frames resampled as the block arrives,
+/// so the frames at the file's own rate are never all held at once. That is
+/// what keeps a file at 384 kHz from taking eight times the memory of the same
+/// music at 44.1 kHz.
+enum Collector {
+    /// The frames of a file already at the internal sample rate.
+    Kept(Vec<Frame>),
+    /// The resampler a file at another sample rate goes through.
+    Resampled(Box<Resampling>),
+}
+
+impl Collector {
+    /// A collector for a file stored at `rate`.
+    fn start(path: &Path, rate: u32) -> Result<Collector, DecodeError> {
+        if rate == SAMPLE_RATE {
+            Ok(Collector::Kept(Vec::new()))
+        } else {
+            Ok(Collector::Resampled(Box::new(Resampling::start(
+                path, rate,
+            )?)))
+        }
+    }
+
+    /// Takes one packet's interleaved samples, holds every sample to
+    /// [`SAMPLE_LIMIT`], and refuses the file once what it holds passes
+    /// [`LONGEST_TRACK`].
+    fn push(&mut self, path: &Path, samples: &[f32], channels: u16) -> Result<(), DecodeError> {
+        match self {
+            Collector::Kept(frames) => {
+                let more = samples.len() / usize::from(channels);
+                room_for(path, frames, more)?;
+                extend_with_frames(frames, samples, channels);
+                Ok(())
+            }
+            Collector::Resampled(resampling) => resampling.push(path, samples, channels),
+        }
+    }
+
+    /// The frames at the internal sample rate, with whatever the resampler
+    /// still holds flushed out of it.
+    fn finish(self, path: &Path) -> Result<Vec<Frame>, DecodeError> {
+        match self {
+            Collector::Kept(frames) => Ok(frames),
+            Collector::Resampled(resampling) => resampling.finish(path),
+        }
+    }
+}
+
+/// Appends `samples` to `frames` as stereo frames, copying a mono file's one
+/// channel to both and holding every sample to [`SAMPLE_LIMIT`].
+fn extend_with_frames(frames: &mut Vec<Frame>, samples: &[f32], channels: u16) {
+    if channels == 1 {
+        frames.extend(samples.iter().map(|sample| {
+            let sample = within_the_limit(*sample);
+            [sample, sample]
+        }));
+    } else {
+        frames.extend(
+            samples
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|frame| [within_the_limit(frame[0]), within_the_limit(frame[1])]),
+        );
+    }
+}
+
+/// Refuses the file when `frames` plus `more` would be longer than a track may
+/// be, and otherwise makes room for `more` frames.
+fn room_for(path: &Path, frames: &mut Vec<Frame>, more: usize) -> Result<(), DecodeError> {
+    let longest = LONGEST_TRACK.0.max(0) as u64;
+    if frames.len() as u64 + more as u64 > longest {
+        return Err(too_long(path));
+    }
+    make_room(frames, more, longest);
+    Ok(())
+}
+
+/// A resampler fed a block at a time, which turns the frames of a file at
+/// another sample rate into frames at the internal sample rate.
 ///
 /// The pitch is unchanged and the length changes in proportion to the two
 /// rates, so a file at 48 kHz comes out about eight percent shorter in frames
-/// and exactly as long in seconds.
-///
-/// The frames are handed over rather than borrowed, so that the memory the
-/// file was decoded into is given back before the resampled frames are built.
-fn resample(path: &Path, frames: Vec<Frame>, rate: u32) -> Result<Vec<Frame>, DecodeError> {
-    let unsupported = || DecodeError::Unsupported {
+/// and exactly as long in seconds. The resampler keeps its own state between
+/// blocks, so the result is the whole track resampled once rather than each
+/// block resampled on its own.
+struct Resampling {
+    /// The resampler, which reads [`Resampling::block`] frames at a time.
+    resampler: Async<f32>,
+    /// How many frames of the file the resampler reads in one call.
+    block: usize,
+    /// The frames of the file that have not gone to the resampler yet, at the
+    /// file's own sample rate.
+    waiting: Vec<Frame>,
+    /// How many frames at the front of `waiting` the resampler has read.
+    read: usize,
+    /// One block of frames, interleaved, as the resampler reads them.
+    block_in: Vec<f32>,
+    /// Room for one block of the resampler's output, interleaved.
+    block_out: Vec<f32>,
+    /// The resampled frames so far, at the internal sample rate.
+    out: Vec<Frame>,
+    /// How many frames of the resampler's own delay are still to be dropped
+    /// from the front of the output. A sinc resampler answers the first
+    /// frames of a track with the silence it starts full of, and those frames
+    /// are what this drops.
+    to_trim: usize,
+    /// How many frames of the file have been read in all, which is what the
+    /// length of the output is worked out from.
+    taken: usize,
+    /// The internal sample rate divided by the file's.
+    ratio: f64,
+    /// The sample rate the file is stored at, which every error names.
+    rate: u32,
+}
+
+impl Resampling {
+    /// A resampler from `rate` to the internal sample rate.
+    fn start(path: &Path, rate: u32) -> Result<Resampling, DecodeError> {
+        let ratio = f64::from(SAMPLE_RATE) / f64::from(rate);
+        // The window is long enough to keep the resampling artifacts far below
+        // the noise floor of any source Dermixen imports.
+        let parameters = SincInterpolationParameters::new(256, WindowFunction::BlackmanHarris2)
+            .oversampling_factor(256)
+            .interpolation(SincInterpolationType::Quadratic);
+        let mut resampler = Async::<f32>::new_sinc(
+            ratio,
+            1.1,
+            &parameters,
+            RESAMPLE_BLOCK,
+            2,
+            FixedAsync::Input,
+        )
+        .map_err(|_| cannot_resample(path, rate))?;
+        resampler.reset();
+
+        let block = resampler.input_frames_max();
+        let room = resampler.output_frames_max();
+        let to_trim = resampler.output_delay();
+        Ok(Resampling {
+            resampler,
+            block,
+            waiting: Vec::with_capacity(block * 2),
+            read: 0,
+            block_in: vec![0.0; block * 2],
+            block_out: vec![0.0; room * 2],
+            out: Vec::new(),
+            to_trim,
+            taken: 0,
+            ratio,
+            rate,
+        })
+    }
+
+    /// Takes one packet's interleaved samples and resamples as many whole
+    /// blocks as the packet completes.
+    fn push(&mut self, path: &Path, samples: &[f32], channels: u16) -> Result<(), DecodeError> {
+        extend_with_frames(&mut self.waiting, samples, channels);
+        // The resampler reads a block only when a further frame is waiting
+        // behind it, so the last block of the file is always the partial one
+        // that `finish` hands over.
+        while self.waiting.len() - self.read > self.block {
+            self.run_block(path, None)?;
+        }
+        self.waiting.drain(..self.read);
+        self.read = 0;
+        Ok(())
+    }
+
+    /// Resamples what is left, flushes the resampler, and gives back the
+    /// frames at the internal sample rate.
+    fn finish(mut self, path: &Path) -> Result<Vec<Frame>, DecodeError> {
+        if self.taken == 0 && self.waiting.is_empty() {
+            return Ok(Vec::new());
+        }
+        let left = self.waiting.len() - self.read;
+        if left > 0 {
+            self.run_block(path, Some(left))?;
+        }
+
+        // The output is as many frames as the two rates make of the input, and
+        // the resampler still holds the end of the track, so blocks of silence
+        // go in until it has given that much back.
+        let expected = (self.ratio * self.taken as f64).ceil() as usize;
+        if expected as u64 > LONGEST_TRACK.0.max(0) as u64 {
+            return Err(too_long(path));
+        }
+        while self.out.len() < expected {
+            self.run_block(path, Some(0))?;
+        }
+        self.out.truncate(expected);
+        Ok(self.out)
+    }
+
+    /// Hands the resampler one block and appends what it gives back.
+    ///
+    /// `valid` is how many of the block's frames are the file's own, and
+    /// `None` means a whole block of them. The resampler reads the rest of the
+    /// block as silence, which is how the last block of a file and the flush
+    /// after it are given.
+    fn run_block(&mut self, path: &Path, valid: Option<usize>) -> Result<(), DecodeError> {
+        let take = valid.unwrap_or(self.block).min(self.block);
+        for (n, frame) in self.waiting[self.read..self.read + take].iter().enumerate() {
+            self.block_in[n * 2] = frame[0];
+            self.block_in[n * 2 + 1] = frame[1];
+        }
+        self.read += take;
+        self.taken += take;
+
+        let Resampling {
+            resampler,
+            block,
+            block_in,
+            block_out,
+            rate,
+            ..
+        } = self;
+        let rate = *rate;
+        let frames_out = block_out.len() / 2;
+        let given = {
+            let input = InterleavedSlice::new(block_in, 2, *block)
+                .map_err(|_| cannot_resample(path, rate))?;
+            let mut output = InterleavedSlice::new_mut(block_out, 2, frames_out)
+                .map_err(|_| cannot_resample(path, rate))?;
+            let indexing = Indexing {
+                partial_len: valid,
+                ..Indexing::default()
+            };
+            let (_read, given) = resampler
+                .process_into_buffer(&input, &mut output, Some(&indexing))
+                .map_err(|_| cannot_resample(path, rate))?;
+            given
+        };
+
+        // The first frames the resampler gives back are its own delay rather
+        // than the track, so they are dropped before anything is kept.
+        let start = self.to_trim.min(given);
+        self.to_trim -= start;
+        let kept = &self.block_out[start * 2..given * 2];
+        // Resampling a sample within the limit can overshoot it, so the output
+        // is held to the limit the way the decoded packets are.
+        room_for(path, &mut self.out, given - start)?;
+        self.out.extend(
+            kept.as_chunks::<2>()
+                .0
+                .iter()
+                .map(|frame| [within_the_limit(frame[0]), within_the_limit(frame[1])]),
+        );
+        Ok(())
+    }
+}
+
+/// The error for a file whose sample rate the resampler cannot work from.
+fn cannot_resample(path: &Path, rate: u32) -> DecodeError {
+    DecodeError::Unsupported {
         path: path.to_path_buf(),
         message: format!("the file is at {rate} Hz, which cannot be resampled to {SAMPLE_RATE} Hz"),
-    };
-    if rate == 0 {
-        return Err(unsupported());
     }
-    if frames.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let ratio = f64::from(SAMPLE_RATE) / f64::from(rate);
-    // The window is long enough to keep the resampling artifacts far below the
-    // noise floor of any source Dermixen imports.
-    let parameters = SincInterpolationParameters::new(256, WindowFunction::BlackmanHarris2)
-        .oversampling_factor(256)
-        .interpolation(SincInterpolationType::Quadratic);
-    let mut resampler = Async::<f32>::new_sinc(ratio, 1.1, &parameters, 1024, 2, FixedAsync::Input)
-        .map_err(|_| unsupported())?;
-
-    // The borrow of the frames ends with this block, so the frames the file
-    // decoded to are given back before the resampled frames are built.
-    let output = {
-        let input = InterleavedSlice::new(frames.as_flattened(), 2, frames.len())
-            .map_err(|_| unsupported())?;
-        resampler
-            .process_all(&input, frames.len(), None)
-            .map_err(|_| unsupported())?
-    };
-    drop(frames);
-
-    // Resampling a sample within the limit can overshoot it, so the output is
-    // held to the limit the way the decoded packets are.
-    let resampled = output.take_data();
-    Ok(resampled
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|frame| [within_the_limit(frame[0]), within_the_limit(frame[1])])
-        .collect())
 }
 
 /// Describes a decoding failure in terms of the file it happened on.
