@@ -957,17 +957,18 @@ fn a_sample_that_is_not_a_number_is_played_as_silence() {
 }
 
 #[test]
-fn overlapping_clicks_sum_and_are_held_within_full_scale() {
-    // At four thousand beats per minute a beat comes every 661.5 frames and
-    // each click lasts 882, so every click overlaps the next; a track held
-    // at 0.9 sits at 0.45 under the clicks, and where two clicks in phase
-    // add to it the sum passes one and is held there.
+fn a_track_over_full_scale_under_a_click_is_held_within_full_scale() {
+    // A float file can hold samples over full scale. A track held at 1.5
+    // sits at 0.75 under the clicks, so wherever a click passes a quarter of
+    // full scale in either direction the sum passes one and is held there.
+    // No tempo a grid may have makes two clicks overlap: a click lasts 882
+    // frames, and a beat at 999 beats per minute lasts 2,649.
     let audio = Arc::new(Audio {
-        frames: vec![[0.9, -0.9]; 44_100],
+        frames: vec![[1.5, -1.5]; 44_100],
     });
-    let g = grid(0, 4000.0);
-    assert_eq!(beat_frame(&g, 1), 662);
-    assert_eq!(beat_frame(&g, 2), 1323);
+    let g = grid(0, 120.0);
+    assert_eq!(beat_frame(&g, 1), 22_050);
+    assert_eq!(beat_frame(&g, 2), 44_100);
     let (want, _) = expected_frames(&audio.frames, 0, &|_| (g, true));
     assert!(
         want.iter().any(|frame| frame[0] == 1.0),
