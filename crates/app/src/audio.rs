@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use dermixen_core::{ContentHash, Samples, Seconds, Track};
 use dermixen_engine::{Output, Resampler, SendLoader, SendStretchers, Source, TimeStretcher};
 use dermixen_library::{Index, PhraseRecord};
-use dermixen_media::{Audio, Frame, Overview, decode};
+use dermixen_media::{Audio, Decoded, Frame, Overview, decode};
 
 /// How many tracks' decoded audio the window keeps.
 ///
@@ -103,6 +103,11 @@ impl AudioCache {
         self.let_one_go();
     }
 
+    /// Lets go of the track kept under `hash`, if one is kept there.
+    fn forget(&mut self, hash: ContentHash) {
+        self.kept.retain(|kept| kept.hash != hash);
+    }
+
     /// Keeps a track the reading thread has decoded, while there is room for
     /// it, ranked below every track the render has asked for.
     fn read_ahead(&mut self, hash: ContentHash, audio: Arc<Audio>) {
@@ -153,6 +158,48 @@ pub fn kept(cache: &Mutex<AudioCache>, hash: ContentHash) -> Option<Arc<Audio>> 
     shared(cache).heard(hash)
 }
 
+/// Lets go of the audio kept under `hash`, if any is kept there.
+///
+/// The window calls this for a track whose file holds other bytes than the
+/// document names, which the reading thread decoded before anything had
+/// compared the two hashes. The audio of another recording would otherwise
+/// answer the render's next call for that track, since the store is keyed by
+/// the hash the caller asked for. The render decodes the file again for a
+/// track whose audio nothing keeps, and that decode compares the hashes.
+pub fn let_go(cache: &Mutex<AudioCache>, hash: ContentHash) {
+    shared(cache).forget(hash);
+}
+
+/// What the window says about a file whose bytes are not the track's.
+///
+/// A mix document names a track by the hash of its file's bytes, and
+/// everything the document says about that track, the beat grid, the anchors,
+/// and the curves, was measured on those bytes. A file at the track's path
+/// whose hash differs is another recording, or the same recording encoded
+/// again, so the window neither draws it nor plays it and says which file it
+/// was.
+pub fn not_the_track(path: &Path) -> String {
+    format!(
+        "The file at {} is not the track the document names. Run `dermixen mix relink` with the \
+         folders to search.",
+        path.display()
+    )
+}
+
+/// Decodes the file at `path` and hands back its audio only when the bytes
+/// that were decoded are the track with `hash`.
+///
+/// Every decode the window makes goes through this, so a file swapped for
+/// another one since the document was written is reported by
+/// [`not_the_track`] rather than drawn on the lane and played.
+fn decoded_track(hash: ContentHash, path: &Path) -> Result<Decoded, String> {
+    let decoded = decode(path).map_err(|problem| problem.to_string())?;
+    if decoded.hash != hash {
+        return Err(not_the_track(path));
+    }
+    Ok(decoded)
+}
+
 /// The audio of a track, from the store when it is there and from the file
 /// when it is not, keeping what was decoded.
 fn audio_of(
@@ -163,7 +210,7 @@ fn audio_of(
     if let Some(audio) = shared(cache).heard(hash) {
         return Ok(audio);
     }
-    let decoded = decode(path).map_err(|problem| problem.to_string())?;
+    let decoded = decoded_track(hash, path)?;
     let audio = Arc::new(decoded.audio);
     shared(cache).keep(hash, Arc::clone(&audio));
     Ok(audio)
@@ -305,8 +352,14 @@ pub fn output(_buffer_frames: Option<NonZeroU32>) -> Result<Box<dyn Output>, Str
 pub enum Finding {
     /// A track's waveform overview, which the window hands the timeline.
     Overview {
-        /// The track's content hash.
+        /// The track's content hash, as the mix document names it, which is
+        /// what the thread was asked for.
         hash: ContentHash,
+        /// The hash of the bytes the thread decoded. It differs from `hash`
+        /// when the file at the track's path is not the track the document
+        /// names, which the window reports with [`not_the_track`] and shows
+        /// on the lane in place of the waveform.
+        decoded: ContentHash,
         /// Its waveform overview.
         overview: Overview,
     },
@@ -484,13 +537,21 @@ fn phrases_for(index: &Index, track: &Wanted) -> Option<Finding> {
 /// Decodes one track, working out its waveform overview and keeping its
 /// audio in `cache` as a read-ahead, or reporting the file by path when it
 /// cannot be read.
+///
+/// The hash of the bytes that were decoded goes with the overview, so the
+/// window can see that the file at the track's path is not the track the
+/// document names. The audio is kept under the hash the thread was asked for,
+/// which is how the render finds it, and the window lets go of the audio of a
+/// track whose bytes were not the document's with [`let_go`].
 fn decode_finding(track: &Wanted, cache: &Mutex<AudioCache>) -> Finding {
     match decode(&track.path) {
         Ok(decoded) => {
             let overview = Overview::of(&decoded.audio, OVERVIEW_BUCKET);
+            let hash = decoded.hash;
             shared(cache).read_ahead(track.hash, Arc::new(decoded.audio));
             Finding::Overview {
                 hash: track.hash,
+                decoded: hash,
                 overview,
             }
         }

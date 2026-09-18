@@ -183,7 +183,6 @@ fn within_two_seconds<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'stat
 
 #[cfg(unix)]
 #[test]
-#[ignore = "window-hardening"]
 fn a_document_that_is_a_device_or_too_large_is_refused_at_once() {
     use dermixen_app::read_the_mix;
     let dir = tempfile::tempdir().unwrap();
@@ -206,7 +205,6 @@ fn a_document_that_is_a_device_or_too_large_is_refused_at_once() {
 }
 
 #[test]
-#[ignore = "window-hardening"]
 fn of_the_documents_one_event_names_only_the_last_is_opened() {
     use dermixen_app::newest_document;
     let paths: Vec<PathBuf> = (0..1_000)

@@ -53,7 +53,7 @@ pub fn open_the_library(path: &Path) -> Result<Index, String> {
     if let Some(folder) = path.parent()
         && !folder.as_os_str().is_empty()
         && !folder.exists()
-        && let Err(problem) = std::fs::create_dir_all(folder)
+        && let Err(problem) = make_folder(folder)
     {
         return Err(format!(
             "cannot make the library file {}: {problem}",
@@ -61,6 +61,51 @@ pub fn open_the_library(path: &Path) -> Result<Index, String> {
         ));
     }
     Index::open(path).map_err(|problem| problem.to_string())
+}
+
+/// Makes `folder` and the folders above it, leaving one that is already
+/// there as it is, with its permissions.
+///
+/// A folder this makes is read, written, and entered by its owner alone,
+/// which is mode 0700 on macOS and Linux. The window makes folders for the
+/// library file, for the corrections, and for the untitled autosave file,
+/// and what goes in them is the person's own listening and their unsaved
+/// work, so nobody else on the machine reads them. A folder somebody made
+/// before keeps the permissions that person gave it, since this changes no
+/// folder it did not make.
+pub fn make_folder(folder: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(folder)
+}
+
+/// `path` as an absolute path, resolved against `folder` when it is
+/// relative, which is what the `dermixen` command does with the
+/// `DERMIXEN_LIBRARY_FILE` environment variable and with its `--library`
+/// option. The file itself need not exist.
+///
+/// The window reports the library file it opened, and a relative path means
+/// a different file from one folder to the next, so the window resolves the
+/// path once and holds the answer. `folder` is the folder the window was
+/// started in, which [`working_folder`] reads.
+pub fn absolute_against(folder: &Path, path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    folder.join(path)
+}
+
+/// The folder the window was started in, which a relative library file is
+/// resolved against.
+pub fn working_folder() -> Result<PathBuf, String> {
+    std::env::current_dir().map_err(|problem| {
+        format!("The folder this window was started in cannot be read: {problem}")
+    })
 }
 
 /// A scan of one folder into one library file, running on its own thread.

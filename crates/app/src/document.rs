@@ -13,6 +13,7 @@
 use std::path::{Path, PathBuf};
 
 use dermixen_core::Mix;
+use dermixen_core::files::{LARGEST_DOCUMENT, read_text};
 
 /// The name the window shows for a mix that has never been saved.
 pub const UNTITLED: &str = "Untitled";
@@ -266,8 +267,7 @@ impl Document {
 /// names a device or a pipe is refused at once and the window never waits on
 /// a read without end.
 pub fn read_the_mix(path: &Path) -> Result<Mix, String> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|problem| format!("cannot read {}: {problem}", path.display()))?;
+    let text = read_text(path, LARGEST_DOCUMENT).map_err(|problem| problem.to_string())?;
     Mix::from_json(&text)
         .map_err(|problem| format!("{} is not a mix document: {problem}", path.display()))
 }
@@ -277,6 +277,5 @@ pub fn read_the_mix(path: &Path) -> Result<Mix, String> {
 /// the one before it. Reading only that one keeps an event that names a
 /// thousand files from holding the window up.
 pub fn newest_document(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
-    let _ = paths;
-    None
+    paths.into_iter().last()
 }

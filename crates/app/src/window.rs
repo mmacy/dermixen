@@ -11,7 +11,7 @@
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -20,8 +20,10 @@ use dermixen_app::{
     Answer, Column, Document, Filters, Finish, GridEditor, GridScene, GridView, Intent,
     LibraryPanel, LibraryRow, MAX_LANE_PX, MIN_LANE_PX, Next, Offer, Playback, Point, Report, Scan,
     Selection, Sort, Step, TAPS_FOR_A_TEMPO, TempoField, Timeline, TransportOrder, View,
-    WheelGesture, arrow_step, autosave, autosave_path, forget_file, offered, offered_untitled,
-    open_the_library, parse_buffer_frames, read_the_mix, untitled_autosave_path, wheel_gesture,
+    WheelGesture, absolute_against, arrow_step, autosave, autosave_path, forget_file, make_folder,
+    newest_document, offered, offered_untitled, open_the_library, parse_buffer_frames,
+    read_the_mix, restart_note, skipped_note, untitled_autosave_path, wheel_gesture,
+    working_folder,
 };
 use dermixen_core::{
     BeatGrid, Beats, Bpm, ContentHash, Curve, Edit, Mix, Preset, Samples, Seconds, Settings,
@@ -172,7 +174,7 @@ fn corrections_dir() -> Result<PathBuf, String> {
         "There is no data folder for this user, so corrections cannot be written".to_owned()
     })?;
     let dir = data.join(DATA_FOLDER).join(CORRECTIONS_FOLDER);
-    std::fs::create_dir_all(&dir)
+    make_folder(&dir)
         .map_err(|problem| format!("Cannot make the folder {}: {problem}", dir.display()))?;
     Ok(dir)
 }
@@ -191,8 +193,16 @@ fn corrections_dir() -> Result<PathBuf, String> {
 /// home folder, so a user with no home folder can open a library and still
 /// be told, when a scan starts, that the music folder cannot be worked out.
 fn library_location(settings: &Settings) -> Result<PathBuf, String> {
-    if let Some(path) = named_library_file() {
-        return Ok(path);
+    if let Some(named) = named_library_file() {
+        // A relative path names one file from one folder and another file
+        // from the next, and the window reports the file it opened, so the
+        // path is resolved here against the folder the window was started
+        // in, which is what the `dermixen` command does with the same
+        // variable.
+        return match named.is_absolute() {
+            true => Ok(named),
+            false => Ok(absolute_against(&working_folder()?, &named)),
+        };
     }
     let data = dirs::data_dir().ok_or_else(|| {
         format!(
@@ -371,6 +381,10 @@ fn reason_only(problem: &IndexError) -> String {
 /// read. Why the window has no library file is already in the status line,
 /// put there when the window worked the path out, so nothing is said about
 /// it a second time here.
+///
+/// One row the library cannot read empties nothing: that row is left out of
+/// the records and counted, and the sentence [`skipped_note`] gives says how
+/// many rows are missing and that a scan puts them back.
 fn library_records(path: Option<&Path>) -> (Vec<TrackRecord>, String) {
     let Some(path) = path else {
         return (Vec::new(), String::new());
@@ -381,8 +395,11 @@ fn library_records(path: Option<&Path>) -> (Vec<TrackRecord>, String) {
             return (Vec::new(), format!("The library panel is empty: {problem}"));
         }
     };
-    match index.query(&Query::default()) {
-        Ok(records) => (records, String::new()),
+    match index.query_with_skipped(&Query::default()) {
+        // A row the library could not read is left out of the panel and
+        // counted, so the panel shows every other track and the status line
+        // says how many rows are missing and what puts them back.
+        Ok((records, skipped)) => (records, skipped_note(skipped)),
         Err(problem) => (
             Vec::new(),
             format!(
@@ -558,6 +575,71 @@ struct Relinking {
     message: String,
 }
 
+/// The pass that looks for the files of a mix's tracks, running on a thread
+/// of its own, and the document it was handed.
+///
+/// The pass reads and hashes every track's file, which takes seconds for a
+/// mix of lossless files, so it runs away from the thread that repaints. The
+/// window paints the document as the file gives it while the pass runs, says
+/// in the status line what it is doing, and takes what the pass found on the
+/// repaint after it finishes.
+struct LookingForFiles {
+    /// The document the pass was handed. The window compares the document
+    /// under it with this one before it takes a new path the pass wrote, so
+    /// an edit made while the pass ran is never thrown away.
+    given: Mix,
+    /// The document with the paths the pass wrote, and what it found, once
+    /// the thread is done.
+    done: Receiver<(Mix, Relinking)>,
+}
+
+impl LookingForFiles {
+    /// Starts the pass over `mix`, looking in the library file at `index`
+    /// when there is one, and calling `wake` when it is done so that the
+    /// window repaints and takes what it found.
+    fn start(
+        index: Option<PathBuf>,
+        mix: Mix,
+        wake: impl Fn() + Send + 'static,
+    ) -> LookingForFiles {
+        let (send, done) = std::sync::mpsc::channel();
+        let given = mix.clone();
+        std::thread::spawn(move || {
+            let mut mix = mix;
+            let found = relink_from_the_index(index.as_deref(), &mut mix);
+            // A send that fails means the window has closed, which ends the
+            // pass rather than being anything to report.
+            let _ = send.send((mix, found));
+            wake();
+        });
+        LookingForFiles { given, done }
+    }
+
+    /// The document and what the pass found, once the thread has finished,
+    /// and nothing while it is still looking.
+    ///
+    /// A thread that stopped without sending anything, which is a thread that
+    /// panicked, counts as a pass that found nothing: the window would
+    /// otherwise wait for a document that is never coming, with the status
+    /// line saying it is still looking.
+    fn finished(&self) -> Option<(Mix, Relinking)> {
+        match self.done.try_recv() {
+            Ok(found) => Some(found),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => Some((
+                self.given.clone(),
+                Relinking {
+                    relinked: false,
+                    no_file: HashMap::new(),
+                    message: "The tracks' files were not looked for, because the thread looking \
+                              for them stopped."
+                        .to_owned(),
+                },
+            )),
+        }
+    }
+}
+
 /// What is wrong with the file of a track the library could not place, and
 /// the reason the operating system gave where it gave one.
 ///
@@ -583,13 +665,14 @@ fn what_is_wrong_with(path: &Path) -> (NoFile, Option<String>) {
 /// `index` names for that track's content hash, and says what became of
 /// every track.
 ///
-/// The window runs this over the mix it opens before it reads any file, and
-/// over the autosaved document when a person restores it, so a track the
-/// library places is read, drawn, and played from its new path as though the
-/// document had named that path all along. Every track's file is read and
-/// hashed, which is what tells a file that has been replaced from the one
-/// the document names, so this takes a few seconds for a mix of lossless
-/// files.
+/// The window runs this over every document it puts under itself, and over
+/// the autosaved document when a person restores it, so a track the library
+/// places is read, drawn, and played from its new path as though the document
+/// had named that path all along. Every track's file is read and hashed,
+/// which is what tells a file that has been replaced from the one the
+/// document names, so this takes a few seconds for a mix of lossless files
+/// and runs on the thread [`LookingForFiles`] starts rather than on the
+/// thread that repaints.
 ///
 /// No folder is searched, which is what `dermixen mix relink` does when it
 /// is given none: the library is the only place the window looks, and a
@@ -1683,9 +1766,10 @@ pub struct Window {
     fitted: bool,
     /// The message the status line shows, empty when there is none.
     message: String,
-    /// Why the render last started over on a replacement, and when this
-    /// window first saw that reason, so that the status line can show it for
-    /// a few seconds and then drop it.
+    /// What the transport did with the last document it was handed, in the
+    /// words [`restart_note`] gives, and when this window first saw that
+    /// answer, so that the status line can show it for a few seconds and
+    /// then drop it.
     started_over: Option<(String, Instant)>,
     /// The folder corrections are written to, kept so that a document put
     /// under the window later can be given it too.
@@ -1709,6 +1793,12 @@ pub struct Window {
     /// content hash, so a note stays with its track as the playlist is
     /// reordered.
     no_file: HashMap<ContentHash, NoFile>,
+    /// The pass looking for the tracks' files, while one is running.
+    ///
+    /// The window starts one for every document it puts under itself and
+    /// takes what it found on the repaint after it finishes. The status line
+    /// says the window is looking for as long as this is here.
+    looking: Option<LookingForFiles>,
     /// Why the last autosave failed, while the last one did.
     ///
     /// This stands in the status line until an autosave succeeds, rather
@@ -1765,10 +1855,11 @@ impl Window {
     /// folder and the library file the command line would use, and with
     /// `settings`, which [`open`] read from the file at `settings_file`.
     ///
-    /// Every track whose file has moved is looked for in that library before
-    /// the reading thread is started, so a track the library places gets its
-    /// waveform, its phrase marks, and its audio like any other track of the
-    /// mix.
+    /// The window starts the pass that looks for the tracks' files on a
+    /// thread of its own and opens without waiting for it, so a mix of
+    /// lossless files appears at once. A track the library places is pointed
+    /// at its file when the pass finishes, and gets its waveform, its phrase
+    /// marks, and its audio like any other track of the mix.
     ///
     /// [`open`] is what reads the mix, reads the settings, and calls this,
     /// and it hands the window that comes back to `eframe`, so nothing else
@@ -1785,7 +1876,7 @@ impl Window {
     /// launch after a build or an install ends with a library.
     pub fn new(
         document: Document,
-        mut mix: Mix,
+        mix: Mix,
         settings_file: PathBuf,
         settings: Settings,
         ctx: &egui::Context,
@@ -1795,7 +1886,10 @@ impl Window {
             move || ctx.request_repaint()
         };
         let library_file = library_file_for(&settings);
-        let relinking = relink_from_the_index(library_file.file.as_deref(), &mut mix);
+        let looking = LookingForFiles::start(library_file.file.clone(), mix.clone(), {
+            let ctx = ctx.clone();
+            move || ctx.request_repaint()
+        });
         let mut timeline = Timeline::new(mix);
         let mut message = String::new();
         let mut corrections = None;
@@ -1817,11 +1911,6 @@ impl Window {
         if !trouble.is_empty() {
             message = trouble;
         }
-        // A library file that could not be opened is reported by the library
-        // panel, and the relinking pass says nothing about that file, so the
-        // two messages stand together rather than one taking the place of
-        // the other.
-        message = say_both(&message, &relinking.message);
         let keys = records
             .iter()
             .filter_map(|record| Some((record.hash, record.key.as_ref()?.camelot)))
@@ -1829,17 +1918,18 @@ impl Window {
         let mut library = LibraryPanel::new(records);
         library.set_mix(timeline.mix());
 
-        let mut handed = HashSet::new();
-        let wanted = to_be_read(timeline.mix(), &relinking.no_file, &mut handed);
+        // The reading thread starts with nothing to read. A track is handed
+        // to it once the pass looking for the files has said which tracks
+        // have a file to read, so that no file is read and hashed twice and
+        // a track with no file is left alone.
+        let handed = HashSet::new();
         let cache = Arc::new(Mutex::new(AudioCache::default()));
-        let reading = Reading::start(wanted, library_file.file.clone(), Arc::clone(&cache), wake);
-
-        // A track pointed at a new file is a document that no longer says
-        // what the project file says, so a save is what keeps the new path.
-        let mut document = document;
-        if relinking.relinked {
-            document.edited();
-        }
+        let reading = Reading::start(
+            Vec::new(),
+            library_file.file.clone(),
+            Arc::clone(&cache),
+            wake,
+        );
 
         // The two path fields show the settings as the settings file has
         // them, which the window reads here because the settings themselves
@@ -1893,7 +1983,8 @@ impl Window {
             overviews: HashMap::new(),
             phrases: HashMap::new(),
             restore: None,
-            no_file: relinking.no_file,
+            no_file: HashMap::new(),
+            looking: Some(looking),
             autosave_trouble: None,
             documents: None,
             library_file: library_file.file,
@@ -1939,16 +2030,29 @@ impl Window {
     /// repaint.
     ///
     /// An overview is proof that the file of the track it belongs to was
-    /// read, so a note the relinking pass left about that track's file is
-    /// dropped when one arrives. A track added again from the library after
-    /// the pass could not find its file therefore shows its waveform without
-    /// a note beside it.
+    /// read and holds the bytes the document names, so a note the relinking
+    /// pass left about that track's file is dropped when one arrives. A track
+    /// added again from the library after the pass could not find its file
+    /// therefore shows its waveform without a note beside it.
     fn collect_findings(&mut self) {
         let mut findings = Vec::new();
         findings.extend(self.reading.findings());
         for finding in findings {
             match finding {
-                Finding::Overview { hash, overview } => {
+                // The file the thread decoded holds other bytes than the ones
+                // the document names, which is the same thing to the window
+                // as no file at all: the lane says the file has changed in
+                // place of the waveform, the audio that was decoded is let
+                // go of rather than played, and the status line names the
+                // file.
+                Finding::Overview { hash, decoded, .. } if decoded != hash => {
+                    audio::let_go(&self.cache, hash);
+                    self.no_file.insert(hash, NoFile::Changed);
+                    if let Some(path) = self.path_of(hash) {
+                        self.message = audio::not_the_track(&path);
+                    }
+                }
+                Finding::Overview { hash, overview, .. } => {
                     self.no_file.remove(&hash);
                     self.overviews.insert(hash, overview.clone());
                     self.timeline.set_overview(hash, overview);
@@ -1960,6 +2064,78 @@ impl Window {
                 Finding::Trouble(problem) => self.message = problem,
             }
         }
+    }
+
+    /// The path the mix under the window gives for the track with `hash`, and
+    /// nothing when no track of that mix has that hash, which is a track
+    /// removed since the reading thread was asked for it.
+    fn path_of(&self, hash: ContentHash) -> Option<PathBuf> {
+        self.timeline
+            .mix()
+            .tracks
+            .iter()
+            .find(|track| track.hash == hash)
+            .map(|track| track.path.clone())
+    }
+
+    /// Starts the pass that looks for the files of `mix`'s tracks in the
+    /// library the window has open, on a thread of its own.
+    ///
+    /// The window starts one for every document it puts under itself: the
+    /// document it opens with, a document **New** or **Open...** brings in,
+    /// and the autosaved document a person restores. A pass already running
+    /// is dropped, and the thread it left ends when it tries to report what
+    /// it found, since the document that pass was looking for is no longer
+    /// the document under the window.
+    fn start_looking_for_the_files(&mut self, mix: Mix) {
+        let ctx = self.repaint.clone();
+        self.looking = Some(LookingForFiles::start(
+            self.library_file.clone(),
+            mix,
+            move || ctx.request_repaint(),
+        ));
+    }
+
+    /// Takes what the pass looking for the tracks' files found, once it has
+    /// finished.
+    ///
+    /// A track the library placed leaves the document with a path it did not
+    /// have, so the document the pass wrote goes under the window and the mix
+    /// counts as changed, which is what makes a save keep the new path. That
+    /// happens only while the mix under the window is still the one the pass
+    /// was handed: an edit made while the pass ran outranks a path, so the
+    /// paths are left out and the status line says to open the mix again. A
+    /// pass that pointed no track at a new file changes no document at all,
+    /// which is every pass over a mix whose files are where the document says.
+    ///
+    /// Every track the pass found a file for is then handed to the reading
+    /// thread, which is what fills the lanes with waveforms.
+    fn collect_the_relinking(&mut self) {
+        let Some(looking) = self.looking.take() else {
+            return;
+        };
+        let Some((relinked, found)) = looking.finished() else {
+            self.looking = Some(looking);
+            return;
+        };
+        self.no_file = found.no_file;
+        let mut message = found.message;
+        if found.relinked {
+            if *self.timeline.mix() == looking.given {
+                self.put_under_the_window(relinked);
+                self.document.edited();
+            } else {
+                message = say_both(
+                    &message,
+                    "The mix was edited while the window was looking, so no track was pointed at \
+                     the file that was found. Open the mix again to point them.",
+                );
+            }
+        }
+        for want in to_be_read(self.timeline.mix(), &self.no_file, &mut self.handed) {
+            self.reading.want(want);
+        }
+        self.message = say_both(&self.message, &message);
     }
 
     /// Whether a scan of the music folder is running.
@@ -2324,10 +2500,22 @@ impl Window {
 
     /// Writes the mix to `path` and says whether it was written, putting the
     /// reason in the status line when it was not.
+    ///
+    /// A mix no document may hold is never written: the file at `path` stays
+    /// as it was, and the status line names the field that is out of range.
+    /// A file already at `path` keeps its permissions, so a document a person
+    /// made private to themselves stays private.
     fn write_the_mix_to(&mut self, path: &Path) -> bool {
+        let text = match self.timeline.mix().checked_json() {
+            Ok(text) => text,
+            Err(problem) => {
+                self.message = format!("Cannot write {}: {problem}", path.display());
+                return false;
+            }
+        };
         // The write names the file itself when it fails, so the status line
         // takes the reason as it comes and only begins it as a sentence.
-        match autosave::write_atomically(path, &self.timeline.mix().to_json()) {
+        match autosave::write_atomically(path, &text) {
             Ok(()) => true,
             Err(problem) => {
                 self.message = capitalized(problem);
@@ -2354,6 +2542,13 @@ impl Window {
     /// passing through the window, or a machine that loses power) therefore
     /// costs at most the edit in progress, and the next time the mix is
     /// opened the window offers the autosaved document back.
+    ///
+    /// An autosave file the window makes is read and written by its owner
+    /// alone, and a folder the window makes for one is entered by its owner
+    /// alone, because the file holds work nobody has saved anywhere else. A
+    /// mix no document may hold is not written: the reason stands in the
+    /// status line as any other failing autosave does, and the file goes on
+    /// holding the document it held.
     fn write_the_autosave(&mut self) {
         let Some(file) = self.autosave_file() else {
             self.autosave_trouble =
@@ -2364,7 +2559,7 @@ impl Window {
         // was read from, and the data folder may never have been made, so
         // the window makes the folder the file goes in before it writes.
         if let Some(folder) = file.parent()
-            && let Err(problem) = std::fs::create_dir_all(folder)
+            && let Err(problem) = make_folder(folder)
         {
             self.autosave_trouble = Some(format!(
                 "cannot make the folder {}: {problem}",
@@ -2372,7 +2567,7 @@ impl Window {
             ));
             return;
         }
-        match autosave::write_atomically(&file, &self.timeline.mix().to_json()) {
+        match autosave::write_file(&file, self.timeline.mix()) {
             Ok(()) => self.autosave_trouble = None,
             Err(problem) => self.autosave_trouble = Some(problem),
         }
@@ -2434,8 +2629,7 @@ impl Window {
                 if ui.button("Restore unsaved changes").clicked()
                     && let Some(offer) = self.restore.take()
                 {
-                    let library = self.library_file.clone();
-                    self.restore_the_document(library.as_deref(), offer.mix);
+                    self.restore_the_document(offer.mix);
                 }
                 if ui.button("Discard them").clicked() {
                     self.restore = None;
@@ -2451,23 +2645,20 @@ impl Window {
     ///
     /// The autosaved document names the paths the last session wrote, so a
     /// track this session relinked as it opened the mix would go back to the
-    /// path its file has left. The same pass over the restored document
-    /// points those tracks at their files again, and it finds a track whose
-    /// file has moved since the window opened. What the pass finds is what
-    /// the lanes and the status line then say, and a path it wrote is kept
-    /// by a save.
-    fn restore_the_document(&mut self, index: Option<&Path>, mut mix: Mix) {
-        let relinking = relink_from_the_index(index, &mut mix);
-        self.no_file = relinking.no_file;
-        self.put_under_the_window(mix);
+    /// path its file has left. The same pass runs over the restored document,
+    /// on a thread of its own as every such pass does, and points those
+    /// tracks at their files again, and it finds a track whose file has moved
+    /// since the window opened. What the pass finds is what the lanes and the
+    /// status line say once it is done, and a path it wrote is kept by a
+    /// save.
+    fn restore_the_document(&mut self, mix: Mix) {
+        self.put_under_the_window(mix.clone());
         // The restored document is not what the project file contains, so it is
         // unsaved work like any other, and the autosave file goes on
         // protecting it.
         self.document.edited();
-        self.message = say_both(
-            "Restored the unsaved changes. Save to keep them.",
-            &relinking.message,
-        );
+        self.message = "Restored the unsaved changes. Save to keep them.".to_owned();
+        self.start_looking_for_the_files(mix);
     }
 
     /// Puts a different document under the window.
@@ -2535,18 +2726,19 @@ impl Window {
         }
     }
 
-    /// Opens every document macOS has asked the window to open since the
+    /// Opens the last document macOS has asked the window to open since the
     /// last repaint, which are the `.dmx` files double-clicked in the Finder
     /// and the ones dropped on the Dermixen icon.
     ///
-    /// Each file takes the route **File > Open...** takes, so the window
+    /// The file takes the route **File > Open...** takes, so the window
     /// asks what should become of unsaved changes first when the mix it
     /// holds has any, prints its `Opened` line for the file, and puts a
     /// file that is no mix document in the status line instead of under the
-    /// window. Of two files that arrive together while the mix has unsaved
-    /// changes, the second is the one waiting on the question, as it is
-    /// when the menu is used twice, because the newest request is the one
-    /// the answer applies to.
+    /// window. One window holds one document, so of the files that arrive
+    /// together only the last is read, as [`newest_document`] has it: each
+    /// of the others would be replaced at once by the file after it, and a
+    /// drop of a thousand files would hold the window up while it read them
+    /// all.
     ///
     /// A file that arrives while one of the two dialogs that ask a question
     /// stands open waits in the channel until that dialog is answered.
@@ -2565,7 +2757,7 @@ impl Window {
             return;
         };
         let paths: Vec<PathBuf> = documents.try_iter().collect();
-        for path in paths {
+        if let Some(path) = newest_document(paths) {
             self.ask_or_do(Intent::Open(path), ctx);
         }
     }
@@ -2593,11 +2785,13 @@ impl Window {
     /// same library rows with the new document's tracks marked, the same
     /// reading thread, the same offer of an autosave, and the same title,
     /// while the history, the preview, and the grid editor that belonged to
-    /// the mix before are dropped. A document whose tracks the relinking
-    /// pass moved starts with unsaved changes, as it does when the window
-    /// opens. The file that protected the mix before is removed, because the
-    /// person has already said what should become of its changes.
-    fn put_a_document_under_the_window(&mut self, document: Document, mut mix: Mix) {
+    /// the mix before are dropped. The pass runs on a thread of its own, so
+    /// the mix coming in is under the window at once, and a document whose
+    /// tracks the pass then moves counts as having unsaved changes, as it
+    /// does when the window opens. The file that protected the mix before is
+    /// removed, because the person has already said what should become of
+    /// its changes.
+    fn put_a_document_under_the_window(&mut self, document: Document, mix: Mix) {
         self.stop();
         // One dialog stands over the window at a time, and a settings dialog
         // left open would cover the mix coming in. Closing it here reads its
@@ -2644,13 +2838,11 @@ impl Window {
         }
         self.read_the_library_again();
         self.start_reading_again();
-        let relinking = relink_from_the_index(self.library_file.as_deref(), &mut mix);
-        self.no_file = relinking.no_file;
-        self.put_under_the_window(mix);
-        if relinking.relinked {
-            self.document.edited();
-        }
-        self.message = say_both(&self.message, &relinking.message);
+        // Nothing the pass over the mix before it found holds for the mix
+        // coming in, so the notes it left go before the new pass starts.
+        self.no_file = HashMap::new();
+        self.put_under_the_window(mix.clone());
+        self.start_looking_for_the_files(mix);
         say_which_file_was_opened(self.document.path());
         self.take_the_offer(offer);
         // A scan already running goes on running, since a scan belongs to
@@ -4521,6 +4713,13 @@ impl Window {
             if self.document.is_unsaved() {
                 ui.label("Unsaved changes");
             }
+            // The pass reads and hashes every track's file, which takes
+            // seconds for a mix of lossless files, and the lanes have no
+            // waveforms until it is done, so the line says what the window
+            // is doing for as long as it does it.
+            if self.looking.is_some() {
+                ui.label("Looking for the tracks' files");
+            }
             // A failing autosave stands here for as long as it is failing,
             // ahead of the passing messages, since it is the one thing in
             // this line that says work is no longer being kept.
@@ -4530,15 +4729,14 @@ impl Window {
                     format!("Autosave failing: {problem}"),
                 );
             }
-            // Why the last edit cost the person the buffering they can see
-            // in this same line, for as long as RESTART_SHOWN.
-            if let Some((reason, since)) = &self.started_over {
+            // What the transport did with the last edit it was handed, for
+            // as long as RESTART_SHOWN: the reason the render started over,
+            // which is the buffering the person can see in this same line,
+            // or the reason the edit was not applied at all.
+            if let Some((note, since)) = &self.started_over {
                 let left = RESTART_SHOWN.checked_sub(since.elapsed());
                 if let Some(left) = left {
-                    ui.colored_label(
-                        Color32::from_rgb(240, 190, 120),
-                        format!("Started over: {reason}"),
-                    );
+                    ui.colored_label(Color32::from_rgb(240, 190, 120), note);
                     // Nothing else need repaint the window for this to go
                     // away by itself when the mix is not playing.
                     ui.ctx().request_repaint_after(left);
@@ -4788,6 +4986,7 @@ impl eframe::App for Window {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.collect_the_relinking();
         self.collect_findings();
         self.collect_the_scan();
         self.close_a_stale_editor();
@@ -4808,8 +5007,8 @@ impl eframe::App for Window {
             ) {
                 ctx.request_repaint_after(PLAYING_REPAINT);
             }
-            // An edit that made the render start over says why it did, and
-            // that reason goes up beside the buffering it caused. It is
+            // An edit the transport did not take as it was given says why,
+            // and that word goes up beside the buffering it caused. It is
             // taken up when it is not the one already showing, which is what
             // keeps a move of the playhead, which leaves the reason where it
             // was, from putting the same words up again.
@@ -4818,10 +5017,8 @@ impl eframe::App for Window {
                 .as_ref()
                 .and_then(|earlier| earlier.last_restart.clone());
             if status.last_restart != showing {
-                self.started_over = status
-                    .last_restart
-                    .clone()
-                    .map(|reason| (reason, Instant::now()));
+                self.started_over =
+                    restart_note(self.status.as_ref(), &status).map(|note| (note, Instant::now()));
             }
             self.status = Some(status);
         } else {

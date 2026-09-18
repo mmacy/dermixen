@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use dermixen_core::Track;
+use dermixen_core::files::write_atomically;
 
 /// Writes the track's grid and anchors as an annotation file in `dir` and
 /// returns its path.
@@ -58,6 +59,9 @@ pub fn write_correction(dir: &Path, track: &Track) -> std::io::Result<PathBuf> {
         grid.time_of(track.anchors.intro).0,
         grid.time_of(track.anchors.outro).0,
     );
-    std::fs::write(&path, text)?;
+    // The file is replaced in one step, so a correction that fails partway
+    // leaves the last one whole rather than half a file the scoreboard would
+    // read as ground truth.
+    write_atomically(&path, false, text.as_bytes())?;
     Ok(path)
 }

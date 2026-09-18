@@ -267,7 +267,6 @@ mod hardening {
     }
 
     #[test]
-    #[ignore = "window-hardening"]
     fn a_save_does_not_write_through_a_link_planted_at_the_old_temporary_name() {
         let dir = tempfile::tempdir().unwrap();
         let (project, mix) = project_in(dir.path());
@@ -288,7 +287,6 @@ mod hardening {
     }
 
     #[test]
-    #[ignore = "window-hardening"]
     fn a_save_keeps_the_documents_permissions_and_an_autosave_is_private() {
         let dir = tempfile::tempdir().unwrap();
         let (project, mix) = project_in(dir.path());
@@ -302,7 +300,6 @@ mod hardening {
     }
 
     #[test]
-    #[ignore = "window-hardening"]
     fn an_autosave_of_a_mix_no_document_may_hold_is_refused_and_the_last_one_stays() {
         let dir = tempfile::tempdir().unwrap();
         let (project, mut mix) = project_in(dir.path());
@@ -318,7 +315,6 @@ mod hardening {
     }
 
     #[test]
-    #[ignore = "window-hardening"]
     fn an_autosave_that_is_a_device_is_unreadable_at_once() {
         let dir = tempfile::tempdir().unwrap();
         let (project, mix) = project_in(dir.path());
