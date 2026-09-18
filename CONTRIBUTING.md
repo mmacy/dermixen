@@ -13,14 +13,14 @@ Correctness is shown by things that run as well as by review: acceptance tests, 
 
 ## Before you open a pull request
 
-`scripts/check.sh` runs what continuous integration runs: the formatting check, the lints with warnings as errors, and every test in the workspace. It must pass on your machine. Continuous integration runs the same three commands on Linux and macOS, and `cargo deny check licenses sources` against `deny.toml`, for every pull request.
+`scripts/check.sh` runs what continuous integration runs: the formatting check, the lints with warnings as errors, and every test in the workspace. It must pass on your machine. Continuous integration runs the same three commands on Linux and macOS, and `cargo deny check` against `deny.toml`, for every pull request. That check covers licenses, security advisories, dependency bans, and dependency sources.
 
 ```
 scripts/check.sh
-cargo deny check licenses sources
+cargo deny check
 ```
 
-A new dependency has to carry a license on the allow list in `deny.toml`. The app is licensed GPL-3.0-or-later, so a dependency under a license the GPL cannot combine with fails the check.
+A new dependency has to carry a license on the allow list in `deny.toml`. The app is licensed GPL-3.0-or-later, so a dependency under a license the GPL cannot combine with fails the check. A new dependency also has to be free of an unaddressed security advisory and of an unpinned wildcard version.
 
 Only the four foreign-function crates (`aubio-sys`, `keyfinder-sys`, `signalsmith-sys`, and `macos-documents-sys`) may contain unsafe code. Every other crate forbids it.
 
