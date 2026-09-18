@@ -1,9 +1,9 @@
-# The dependency check `cargo deny check` runs. It checks licenses, advisories,
-# bans, and sources: a crate in the dependency graph must carry an allowed
-# license, must not carry a known vulnerability or an unmaintained-crate
-# advisory without a recorded reason, must not appear as an unpinned wildcard
-# dependency, and must come from a known registry or git source. Continuous
-# integration runs the check.
+# This file configures `cargo deny check`. The check covers licenses,
+# advisories, bans, and sources. A crate in the dependency graph must carry
+# an allowed license. It must not carry a known vulnerability or an
+# unmaintained-crate advisory without a recorded reason. It must not appear
+# as an unpinned wildcard dependency. It must come from a known registry or
+# git source. Continuous integration runs the check.
 
 [graph]
 all-features = true
@@ -12,7 +12,6 @@ all-features = true
 allow = [
     "GPL-3.0-or-later",
     "LGPL-3.0-only",
-    "LGPL-3.0-or-later",
     "MIT",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
@@ -28,36 +27,28 @@ allow = [
 ]
 confidence-threshold = 0.8
 
+# mp3lame-encoder and mp3lame-sys both declare the deprecated identifier
+# LGPL-3.0 in their Cargo.toml, which cargo-deny cannot parse: SPDX replaced
+# it with LGPL-3.0-only. Each block restates the crate's own declaration in
+# its current spelling, against the LICENSE file each crate ships.
 [[licenses.clarify]]
 name = "mp3lame-encoder"
 expression = "LGPL-3.0-only"
-license-files = []
+license-files = [{ path = "LICENSE", hash = 0xdb3c2abe }]
 
 [[licenses.clarify]]
 name = "mp3lame-sys"
 expression = "LGPL-3.0-only"
-license-files = []
+license-files = [{ path = "LICENSE", hash = 0xdb3c2abe }]
 
 [advisories]
 # Every crate in the graph carrying a RUSTSEC advisory needs either a fixed
-# version or an entry here saying why none applies yet.
+# version or an entry here saying why none applies.
 ignore = [
-    # lofty depends on paste, which its author has archived. No release of
-    # lofty has dropped the dependency, so no upgrade removes it.
-    "RUSTSEC-2024-0436",
-    # eframe's Linux accessibility support depends on zbus_xml through
-    # zbus-lockstep and atspi-common, and zbus_xml pins quick-xml to the
-    # 0.38 line, which has the quadratic attribute check this advisory
-    # describes. No release in that chain uses a fixed quick-xml yet.
-    "RUSTSEC-2026-0194",
-    # The same zbus_xml dependency also carries the unbounded
-    # namespace-declaration allocation this advisory describes, for the
-    # same reason: no release in the chain uses a fixed quick-xml yet.
-    "RUSTSEC-2026-0195",
-    # eframe depends on winit, which depends on ttf-parser through
-    # ab_glyph and sctk-adwaita. The ttf-parser author has stated the
-    # crate is unmaintained, and no fixed version exists.
-    "RUSTSEC-2026-0192",
+    { id = "RUSTSEC-2024-0436", reason = "dermixen-library depends on lofty, which depends on paste. The author of paste archived paste, so no release of lofty can drop it." },
+    { id = "RUSTSEC-2026-0194", reason = "dermixen-app depends on eframe, whose Linux accessibility support depends on zbus_xml through zbus-lockstep and atspi-common. The defect this advisory describes is in quick-xml 0.38, and zbus_xml requires quick-xml ^0.38." },
+    { id = "RUSTSEC-2026-0195", reason = "dermixen-app depends on eframe, whose Linux accessibility support depends on zbus_xml through zbus-lockstep and atspi-common. The defect this advisory describes is in quick-xml 0.38, and zbus_xml requires quick-xml ^0.38." },
+    { id = "RUSTSEC-2026-0192", reason = "dermixen-app depends on eframe, which depends on winit, which depends on sctk-adwaita, which depends on ab_glyph, which depends on owned_ttf_parser, which depends on ttf-parser. The author of ttf-parser has stated that ttf-parser is unmaintained." },
 ]
 
 [bans]
