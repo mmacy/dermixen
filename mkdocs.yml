@@ -11,6 +11,8 @@ theme:
   # The app icon, copied from packaging/icon/dermixen.svg by scripts/make-icon.sh.
   logo: images/dermixen-icon.svg
   favicon: images/dermixen-icon.svg
+  # Disabled so the site never requests a font from Google Fonts.
+  font: false
   features:
     # A button in the corner of every code block copies its text.
     - content.code.copy
