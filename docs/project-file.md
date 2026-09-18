@@ -34,6 +34,8 @@ Every field shown is required except `gain_db`, which may be omitted and then me
 
 Every number has a stated range, given with its field below. No real mix reaches one of these limits. `dermixen` holds every number in a file to its range before it accepts the file, so a file `dermixen` accepts lays out, renders, and can be written back.
 
+The file itself is at most 16 mebibytes (16777216 bytes), which is the largest file `dermixen` reads. A mix within every number's range can still produce a file past this size, from enough tracks or enough envelope and tempo nodes, and `dermixen` then refuses to write it: fewer tracks, or fewer nodes, bring the file back under the limit.
+
 The file contains what a render needs and nothing else. Tags and musical key belong to [the library](library.md), where the app looks them up by `hash`.
 
 ## Top level
