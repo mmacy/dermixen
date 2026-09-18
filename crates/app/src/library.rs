@@ -31,6 +31,28 @@ pub fn time_text(at: Seconds) -> String {
     format!("{minutes}:{seconds:04.1}")
 }
 
+/// What the status line says about the rows of a library a query could not
+/// read, which is nothing when it could read every row.
+///
+/// A row with a value of the wrong type, text that is not UTF-8, or a number
+/// a mix document would refuse is left out of the panel and counted by
+/// [`dermixen_library::Index::query_with_skipped`], so one damaged row costs
+/// the person that row rather than the whole panel. A scan of the music
+/// folder reads the file again and replaces the record, which is the remedy
+/// this names.
+pub fn skipped_note(skipped: usize) -> String {
+    match skipped {
+        0 => String::new(),
+        1 => "1 row of the library could not be read, so the panel leaves it out. Library > Scan \
+              music folder replaces it."
+            .to_owned(),
+        many => format!(
+            "{many} rows of the library could not be read, so the panel leaves them out. Library > \
+             Scan music folder replaces them."
+        ),
+    }
+}
+
 /// One column of the table, in the order the window draws them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Column {

@@ -12,6 +12,9 @@
 
 use std::path::{Path, PathBuf};
 
+use dermixen_core::Mix;
+use dermixen_core::files::{LARGEST_DOCUMENT, read_text};
+
 /// The name the window shows for a mix that has never been saved.
 pub const UNTITLED: &str = "Untitled";
 
@@ -250,4 +253,29 @@ impl Document {
             *waiting = Waiting::Ready;
         }
     }
+}
+
+/// The mix in the file at `path`, or why the file is not one.
+///
+/// The window reads a mix the same way when it opens and when **Open**
+/// brings another mix under a window that is already open, so a file that
+/// cannot be read says the same thing in the status line as on the command
+/// line.
+///
+/// The file is read as [`dermixen_core::files::read_text`] reads one, with
+/// [`dermixen_core::files::LARGEST_DOCUMENT`] as its limit, so a path that
+/// names a device or a pipe is refused at once and the window never waits on
+/// a read without end.
+pub fn read_the_mix(path: &Path) -> Result<Mix, String> {
+    let text = read_text(path, LARGEST_DOCUMENT).map_err(|problem| problem.to_string())?;
+    Mix::from_json(&text)
+        .map_err(|problem| format!("{} is not a mix document: {problem}", path.display()))
+}
+
+/// The one document to open out of those the desktop named in one event: the
+/// last of them, since the window holds one document and each would replace
+/// the one before it. Reading only that one keeps an event that names a
+/// thousand files from holding the window up.
+pub fn newest_document(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    paths.into_iter().last()
 }

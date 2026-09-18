@@ -23,15 +23,17 @@ pub use autosave::{
     write_atomically,
 };
 pub use corrections::write_correction;
-pub use document::{Answer, Document, EDITED, Intent, Next, Step, UNTITLED};
+pub use document::{
+    Answer, Document, EDITED, Intent, Next, Step, UNTITLED, newest_document, read_the_mix,
+};
 pub use fields::{Finish, TempoField, parse_buffer_frames};
 pub use grid::{
     DRAG_PX, GridBeat, GridColumn, GridEditor, GridScene, GridView, HIGHEST_BPM, LOWEST_BPM,
     MIN_SAMPLES_PER_PX, TAP_GAP, TAPS_FOR_A_TEMPO, arrow_step,
 };
-pub use library::{Column, Filters, LibraryPanel, LibraryRow, Sort};
-pub use playback::{Playback, PlaybackState, TransportOrder};
-pub use scanning::{Report, Scan, open_the_library};
+pub use library::{Column, Filters, LibraryPanel, LibraryRow, Sort, skipped_note};
+pub use playback::{Playback, PlaybackState, TransportOrder, restart_note};
+pub use scanning::{Report, Scan, absolute_here, make_folder, open_the_library};
 pub use timeline::{
     AnchorMark, DEFAULT_TEMPO, EDGE_PX, HIT_PX, Lane, MAX_LANE_PX, MIN_BAR_PX, MIN_LANE_PX,
     NodeMark, PhraseMark, Point, REACH_MARGIN, Scene, Selection, TEMPO_MARGIN, TempoLane,

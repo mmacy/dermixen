@@ -252,3 +252,78 @@ fn an_untitled_mix_is_kept_in_the_data_folder_and_offered_back_unless_empty() {
     assert!(!file.exists());
     forget_file(&file).unwrap();
 }
+
+#[cfg(unix)]
+mod hardening {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    use dermixen_app::{Offer, autosave_path, offered, write_atomically};
+    use dermixen_core::Decibels;
+
+    use super::{files_in, project_in};
+
+    fn mode_of(path: &std::path::Path) -> u32 {
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[test]
+    fn a_save_does_not_write_through_a_link_planted_at_the_old_temporary_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let (project, mix) = project_in(dir.path());
+        let victim = dir.path().join("victim.txt");
+        std::fs::write(&victim, "PRECIOUS").unwrap();
+        symlink(&victim, dir.path().join("set.dmx.part")).unwrap();
+        symlink(&victim, dir.path().join("set.dmx.autosave.part")).unwrap();
+
+        write_atomically(&project, &mix.to_json()).unwrap();
+        dermixen_app::autosave::write(&project, &mix).unwrap();
+        assert_eq!(std::fs::read(&victim).unwrap(), b"PRECIOUS");
+        assert!(
+            std::fs::symlink_metadata(&project)
+                .unwrap()
+                .file_type()
+                .is_file()
+        );
+    }
+
+    #[test]
+    fn a_save_keeps_the_documents_permissions_and_an_autosave_is_private() {
+        let dir = tempfile::tempdir().unwrap();
+        let (project, mix) = project_in(dir.path());
+        std::fs::set_permissions(&project, std::fs::Permissions::from_mode(0o600)).unwrap();
+        write_atomically(&project, &mix.to_json()).unwrap();
+        assert_eq!(mode_of(&project), 0o600);
+
+        std::fs::set_permissions(&project, std::fs::Permissions::from_mode(0o644)).unwrap();
+        dermixen_app::autosave::write(&project, &mix).unwrap();
+        assert_eq!(mode_of(&autosave_path(&project)), 0o600);
+    }
+
+    #[test]
+    fn an_autosave_of_a_mix_no_document_may_hold_is_refused_and_the_last_one_stays() {
+        let dir = tempfile::tempdir().unwrap();
+        let (project, mut mix) = project_in(dir.path());
+        mix.tracks[0].gain = Decibels(-3.0);
+        dermixen_app::autosave::write(&project, &mix).unwrap();
+        let kept = std::fs::read(autosave_path(&project)).unwrap();
+
+        mix.tracks[0].gain = Decibels(f64::NEG_INFINITY);
+        let said = dermixen_app::autosave::write(&project, &mix).unwrap_err();
+        assert!(said.contains("gain_db"), "{said}");
+        assert_eq!(std::fs::read(autosave_path(&project)).unwrap(), kept);
+        assert_eq!(files_in(dir.path()), ["set.dmx", "set.dmx.autosave"]);
+    }
+
+    #[test]
+    fn an_autosave_that_is_a_device_is_unreadable_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let (project, mix) = project_in(dir.path());
+        symlink("/dev/zero", autosave_path(&project)).unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || sender.send(offered(&project, &mix)));
+        let offer = receiver
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("the autosave was still being read after two seconds");
+        assert!(matches!(offer, Offer::Unreadable(_)), "{offer:?}");
+    }
+}
