@@ -1074,6 +1074,7 @@ name = "dermixen-core"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "libc",
  "proptest",
  "serde",
  "serde_json",
