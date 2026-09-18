@@ -2,9 +2,8 @@
 # Downloads the five starter tracks by Undefunktis into
 # $HOME/Music/Undefunktis, the music folder's default, which the window
 # scans into the first library it makes. The script makes the folder if
-# it is not there, skips a file that is already there, prints one line
-# per file it downloads, and stops at the first download that fails or
-# whose digest is wrong.
+# it is not there, prints one line per file it downloads, and stops at
+# the first download that fails or whose digest is wrong.
 #
 # curl downloads the assets from the release on GitHub. When the gh
 # command is on the path, the script downloads with gh instead. Setting
@@ -14,14 +13,20 @@
 # server, with no network and no GitHub login.
 #
 # Every download is checked against the SHA-256 digest recorded in the
-# digest_for function below before it is kept. A download whose digest
-# does not match is deleted, reported on standard error naming the file,
-# and stops the script. Each file downloads to a temporary name inside
-# the destination folder first, with mktemp, and is moved into place
-# only once its digest matches, so a failed or mismatched download never
-# leaves a partial or wrong file at the name the window will read. A
-# destination that is already a symbolic link is refused outright, so
-# this script never writes through a link planted where a track belongs.
+# digest_for function below before it is kept. A file already at a
+# track's destination is checked the same way: a correct one is left
+# alone and reported as already there, and a wrong one is reported and
+# downloaded again. Each download goes to a temporary name inside the
+# destination folder first, made with mktemp, and is moved into place
+# only once its digest matches, so a failed, interrupted, or mismatched
+# download leaves nothing at the name the window will read rather than
+# a partial or wrong file. A leftover temporary file from an earlier,
+# interrupted run is removed before the script downloads anything.
+#
+# A destination that is already a symbolic link is refused, so this
+# script never writes through a link planted where a track belongs, and
+# the music folder itself is refused the same way when it is a symbolic
+# link.
 #
 # The tracks are licensed under CC BY-NC-SA 4.0.
 
@@ -80,7 +85,17 @@ download_with_curl() {
     curl -fL -o "$2" "$url"
 }
 
+if [ -L "$DEST" ]; then
+    echo "$DEST is a symbolic link, refusing to use it as the music folder" >&2
+    exit 1
+fi
+
 mkdir -p "$DEST"
+
+# A temporary file from a run that failed or was interrupted before its
+# trap could remove it. It has no destination it belongs to, so it is
+# safe to remove before this run downloads anything.
+rm -f "$DEST"/.starter-track.*
 
 for file in \
     "Undefunktis - Cosmic Gravy.mp3" \
@@ -96,11 +111,6 @@ do
         exit 1
     fi
 
-    if [ -f "$destination" ]; then
-        echo "$file is already in $DEST, skipping"
-        continue
-    fi
-
     # GitHub replaces each space in an uploaded asset's file name with a
     # dot, so the asset on the release is not spelled the way the track
     # is named locally.
@@ -111,8 +121,19 @@ do
         exit 1
     fi
 
+    if [ -f "$destination" ]; then
+        if [ "$(sha256_of "$destination")" = "$expected" ]; then
+            echo "$file is already in $DEST, skipping"
+            continue
+        fi
+        echo "$file is in $DEST with the wrong SHA-256 digest, downloading it again" >&2
+        rm -f "$destination"
+    fi
+
     echo "Downloading $file"
     tmp=$(mktemp "$DEST/.starter-track.XXXXXX")
+    trap 'rm -f "$tmp"' EXIT INT TERM
+
     if [ -z "${DERMIXEN_STARTER_TRACKS_URL:-}" ] && command -v gh >/dev/null 2>&1; then
         download_with_gh "$asset" "$tmp"
     else
@@ -121,10 +142,10 @@ do
 
     actual=$(sha256_of "$tmp")
     if [ "$actual" != "$expected" ]; then
-        rm -f "$tmp"
         echo "$file downloaded with the wrong SHA-256 digest: expected $expected, got $actual" >&2
         exit 1
     fi
 
     mv "$tmp" "$destination"
+    trap - EXIT INT TERM
 done

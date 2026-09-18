@@ -41,12 +41,12 @@ CONTAINER_IDS = frozenset({b"RIFF", b"LIST"})
 
 MAX_FILE_SIZE = 64 * 1024 * 1024
 """Largest file this module reads as a playlist. The largest real playlist on
-record is under 1 MB, so this limit is generous rather than tight."""
+record is under 1 MB."""
 
 MAX_NESTING_DEPTH = 25
-"""Deepest a chunk inside a track is let nest. A real playlist nests a handful
-of levels deep at most, so a file that nests further is damaged rather than
-unusual."""
+"""How deep a chunk inside a track is allowed to nest. A real playlist nests a
+handful of levels deep at most, so a file that nests further is damaged
+rather than unusual."""
 
 CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 """A C0, C1, or DEL control character, the kind a terminal can act on."""
@@ -195,9 +195,10 @@ class Playlist:
 def _visible(text: str) -> str:
     """`text` with every control character replaced by a visible escape.
 
-    A path or a transition name comes straight out of the file, and a control
-    character in it, such as an escape or a bell, can act on the terminal
-    printing it. Each C0, C1, or DEL character becomes `\\xHH` instead.
+    A path or a transition name comes straight out of the file, and a
+    terminal printing it reads a control character in it, such as an escape
+    or a bell, as a command rather than a character to display. Each C0, C1,
+    or DEL character becomes `\\xHH` instead.
     """
     return CONTROL_CHARACTERS.sub(lambda match: f"\\x{ord(match.group()):02x}", text)
 
@@ -220,10 +221,10 @@ def _chunk_header(data: bytes, offset: int, end: int) -> tuple[bytes, int, int]:
         where the payload begins.
 
     Raises:
-        ValueError: If the header runs past `end`, or the payload it declares
-            reaches past the bytes the file actually holds. A playlist is
-            judged against what is really there, not against what a chunk
-            says about itself.
+        ValueError: If the header runs past `end`, or the chunk's declared
+            payload size reaches past the bytes the file actually holds.
+            This check compares a declared size against the bytes the file
+            actually has, rather than trusting the declared size outright.
     """
     if offset + 8 > end:
         raise ValueError("a chunk header runs past the end of its container")
@@ -333,7 +334,11 @@ def read_playlist(path: str | Path) -> Playlist:
             f"ever is (the limit is {MAX_FILE_SIZE} bytes)"
         )
     data = path.read_bytes()
-    if data[:4] != b"RIFF" or data[8:12] != b"MXMP":
+    try:
+        riff_id, riff_size, riff_body = _chunk_header(data, 0, len(data))
+    except ValueError as error:
+        raise ValueError(f"{path} is not a MixMeister playlist ({error})") from error
+    if riff_id != b"RIFF" or data[riff_body : riff_body + 4] != b"MXMP":
         raise ValueError(f"{path} is not a MixMeister playlist (expected a RIFF file of form MXMP)")
 
     playlist = Playlist()

@@ -88,18 +88,20 @@ USER_AGENT = "DermixenReleaseMatcher/1.0 +https://github.com/mmacy/dermixen"
 
 
 class _RefuseCrossHostRedirect(urllib.request.HTTPRedirectHandler):
-    """Refuses a redirect that points at a different host or port.
+    """Refuses a redirect that points at a different host, port, or scheme.
 
     A request built here carries the Discogs `Authorization` header, and
     `urllib` forwards every header, that one included, when it follows a
-    redirect on its own. Refusing a redirect that changes the host or the
-    port keeps the header from ever reaching a host it was not made for.
+    redirect on its own. Refusing a redirect that changes the host, the
+    port, or the scheme keeps the header from ever reaching a host it was
+    not made for, and keeps it from ever crossing from `https` to `http`,
+    where it would travel in the clear.
     """
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         before = urllib.parse.urlsplit(req.full_url)
         after = urllib.parse.urlsplit(newurl)
-        if (before.hostname, before.port) != (after.hostname, after.port):
+        if (before.scheme, before.hostname, before.port) != (after.scheme, after.hostname, after.port):
             return None
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
@@ -118,7 +120,7 @@ def open_request(request: urllib.request.Request, timeout: float = 30):
 
 
 def as_text(value) -> str:
-    """`value` as text, or the empty string when it is not text.
+    """`value`, taken as text, or the empty string when it is not text.
 
     A Discogs answer sometimes puts a number, a list, or an object where the
     format calls for a name or a title. None of those state text this
@@ -143,8 +145,11 @@ def as_label_list(value) -> list[str]:
 
 
 def as_year_or(value, default: int) -> int:
-    """The year a Discogs `year` field names, or `default` when it names none
-    plainly, as when the field holds a roman numeral, a list, or nothing."""
+    """The year a Discogs `year` field names, or `default` when it names none.
+
+    A field names no year plainly when it holds a roman numeral, a list, or
+    nothing at all.
+    """
     if isinstance(value, bool):
         return default
     if isinstance(value, int):
@@ -155,15 +160,18 @@ def as_year_or(value, default: int) -> int:
 
 
 def escaped_like(fragment: str) -> str:
-    """`fragment` with SQLite's `LIKE` wildcards escaped, so a folder name
-    that happens to contain `%` or `_` is matched literally rather than as a
-    wildcard. Pass it to a query that also gives `LIKE` the clause
-    `ESCAPE '\\'`."""
+    """`fragment` with SQLite's `LIKE` wildcards escaped.
+
+    A folder name that happens to contain `%` or `_` is matched literally
+    rather than as a wildcard once escaped this way. Pass the result to a
+    query that also gives `LIKE` the clause `ESCAPE '\\'`.
+    """
     return fragment.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def cell(value):
-    """`value` as a spreadsheet cannot mistake for a formula.
+    """`value`, with a quote added only if a spreadsheet might read it as a
+    formula.
 
     A text value that begins with `=`, `+`, `-`, `@`, a tab, or a carriage
     return is a formula to a spreadsheet that opens the CSV this module
@@ -173,6 +181,24 @@ def cell(value):
     """
     if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
         return f"'{value}"
+    return value
+
+
+def uncell(value):
+    """The inverse of [`cell`][tools.discogs_release.cell].
+
+    A value that begins with a single quote followed by one of `=`, `+`,
+    `-`, `@`, a tab, or a carriage return loses that quote, undoing what
+    `cell` added when the CSV was written. Every other value is returned
+    unchanged.
+    """
+    if (
+        isinstance(value, str)
+        and len(value) >= 2
+        and value[0] == "'"
+        and value[1] in ("=", "+", "-", "@", "\t", "\r")
+    ):
+        return value[1:]
     return value
 
 
@@ -616,7 +642,11 @@ def run_match(args: argparse.Namespace) -> int:
 def run_apply(args: argparse.Namespace) -> int:
     """Writes the release columns into the library index from a match CSV."""
     with open(args.proposed, newline="", encoding="utf-8") as handle:
-        rows = [row for row in csv.DictReader(handle) if row["data_source"]]
+        rows = [
+            {key: uncell(value) for key, value in row.items()}
+            for row in csv.DictReader(handle)
+            if row["data_source"]
+        ]
     connection = sqlite3.connect(args.library)
     try:
         version = connection.execute("PRAGMA user_version").fetchone()[0]

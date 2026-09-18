@@ -27,7 +27,7 @@ python3 tools/mmp_dump.py --json "some playlist.mmp"
 
 It needs nothing beyond a Python 3 interpreter. The readable output gives one block per track. The JSON output gives the same information in full, which is the more useful form for feeding another program.
 
-A damaged playlist, one whose chunks nest too deep or whose declared sizes do not match the bytes the file holds, is reported in one line on standard error naming the file, and the program exits with status 1 rather than crashing. A file over 64 MB is refused the same way before it is read, since the largest real playlist is under 1 MB. The readable output escapes a control character found in a path or a transition name, such as an escape or a bell, as `\xHH`, so a hostile file cannot act on the terminal printing it. The JSON output leaves the character as it is, since JSON already escapes it.
+A damaged playlist, one whose chunks nest too deep or whose declared sizes do not match the bytes the file holds, is reported in one line on standard error naming the file, and the program exits with status 1 rather than crashing. A file over 64 MB is refused the same way before it is read, since the largest real playlist is under 1 MB. The readable output escapes a control character found in a path or a transition name, such as an escape or a bell, as `\xHH`, since a terminal interprets those characters as commands rather than printing them. The JSON output leaves the character as it is, since JSON already escapes it.
 
 ### What the format looks like
 

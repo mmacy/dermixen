@@ -58,6 +58,7 @@ from discogs_release import (  # noqa: E402
     RateLimited,
     as_label_list,
     as_text,
+    cell,
     comparable,
     credentials,
     escaped_like,
@@ -67,6 +68,7 @@ from discogs_release import (  # noqa: E402
     open_request,
     release_folder,
     search_releases,
+    uncell,
 )
 
 # A year at or after this one is a suspect. Goa trance that says 2005 or later
@@ -537,7 +539,7 @@ def run_match(args: argparse.Namespace) -> int:
     with open(args.out, "w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=FIELDS)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows({key: cell(value) for key, value in row.items()} for row in rows)
     print(
         f"{len(rows)} rows need a year"
         f"{' (including rows that have none)' if args.include_undated else ''}. "
@@ -562,7 +564,11 @@ def run_match(args: argparse.Namespace) -> int:
 def run_apply(args: argparse.Namespace) -> int:
     """Writes the proposed years into the library."""
     with open(args.proposed, newline="", encoding="utf-8") as handle:
-        rows = [row for row in csv.DictReader(handle) if row["source"]]
+        rows = [
+            {key: uncell(value) for key, value in row.items()}
+            for row in csv.DictReader(handle)
+            if row["source"]
+        ]
     connection = open_library(args.library, writable=True)
     try:
         dated = cleared = 0
@@ -726,7 +732,7 @@ def run_approximate(args: argparse.Namespace) -> int:
     with open(args.out, "w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=APPROXIMATE_FIELDS)
         writer.writeheader()
-        writer.writerows(proposals)
+        writer.writerows({key: cell(value) for key, value in row.items()} for row in proposals)
     proposed = [row for row in proposals if row["proposed_year"]]
     print(
         f"{len(proposals)} releases have undated tracks, "
@@ -747,7 +753,11 @@ def run_apply_approximate(args: argparse.Namespace) -> int:
     later query that the track is placed in an era rather than dated.
     """
     with open(args.proposed, newline="", encoding="utf-8") as handle:
-        rows = [row for row in csv.DictReader(handle) if row["proposed_year"].strip()]
+        rows = [
+            {key: uncell(value) for key, value in row.items()}
+            for row in csv.DictReader(handle)
+            if row["proposed_year"].strip()
+        ]
     connection = open_library(args.library, writable=True)
     try:
         written = 0
