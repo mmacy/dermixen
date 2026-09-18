@@ -825,7 +825,6 @@ fn a_new_library_file_reached_through_a_link_is_for_its_owner_alone() {
 }
 
 #[test]
-#[ignore = "library-read-cap"]
 fn a_text_value_of_any_size_in_a_library_file_is_read_up_to_the_longest_tag() {
     // A scan never stores more than the longest tag, and a library file can
     // also come from another person, with a title of any size in it.
