@@ -19,6 +19,12 @@ serde_path_to_error = "0.1"
 thiserror.workspace = true
 toml = "1.1.5"
 
+# The one thing this crate asks libc for is the value of O_NONBLOCK, which the
+# bounded read in src/files.rs passes to the open so that a named pipe never
+# blocks it.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 proptest.workspace = true
 tempfile = "3.27.0"

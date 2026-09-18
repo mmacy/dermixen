@@ -47,7 +47,6 @@ fn names_in(folder: &Path) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "file-helpers"]
 fn a_regular_file_within_the_limit_is_read() {
     let folder = tempfile::tempdir().unwrap();
     let path = folder.path().join("set.dmx");
@@ -61,7 +60,6 @@ fn a_regular_file_within_the_limit_is_read() {
 }
 
 #[test]
-#[ignore = "file-helpers"]
 fn a_file_one_byte_over_the_limit_is_refused_by_size() {
     let folder = tempfile::tempdir().unwrap();
     let path = folder.path().join("set.dmx");
@@ -75,7 +73,6 @@ fn a_file_one_byte_over_the_limit_is_refused_by_size() {
 }
 
 #[test]
-#[ignore = "file-helpers"]
 fn a_missing_file_is_an_input_error_that_says_not_found() {
     let folder = tempfile::tempdir().unwrap();
     match read_text(&folder.path().join("nothing.dmx"), 10) {
@@ -87,7 +84,6 @@ fn a_missing_file_is_an_input_error_that_says_not_found() {
 }
 
 #[test]
-#[ignore = "file-helpers"]
 fn text_that_is_not_utf8_is_an_input_error() {
     let folder = tempfile::tempdir().unwrap();
     let path = folder.path().join("set.dmx");
@@ -96,7 +92,6 @@ fn text_that_is_not_utf8_is_an_input_error() {
 }
 
 #[test]
-#[ignore = "file-helpers"]
 fn a_device_a_pipe_and_a_folder_are_refused_at_once() {
     let folder = tempfile::tempdir().unwrap();
     let pipe = folder.path().join("pipe.dmx");
@@ -132,7 +127,6 @@ fn a_device_a_pipe_and_a_folder_are_refused_at_once() {
 }
 
 #[test]
-#[ignore = "file-helpers"]
 fn an_atomic_write_replaces_the_destination_and_leaves_nothing_else() {
     let folder = tempfile::tempdir().unwrap();
     let path = folder.path().join("set.dmx");
@@ -144,7 +138,6 @@ fn an_atomic_write_replaces_the_destination_and_leaves_nothing_else() {
 }
 
 #[test]
-#[ignore = "file-helpers"]
 fn a_write_that_is_not_committed_changes_nothing_and_leaves_nothing() {
     let folder = tempfile::tempdir().unwrap();
     let path = folder.path().join("set.dmx");
@@ -160,7 +153,6 @@ fn a_write_that_is_not_committed_changes_nothing_and_leaves_nothing() {
 }
 
 #[test]
-#[ignore = "file-helpers"]
 fn a_writer_can_own_a_handle_of_its_own() {
     let folder = tempfile::tempdir().unwrap();
     let path = folder.path().join("out.wav");
@@ -173,7 +165,6 @@ fn a_writer_can_own_a_handle_of_its_own() {
 }
 
 #[test]
-#[ignore = "file-helpers"]
 fn a_link_planted_at_a_predictable_temporary_name_is_not_written_through() {
     let folder = tempfile::tempdir().unwrap();
     let victim = folder.path().join("victim.txt");
@@ -189,7 +180,6 @@ fn a_link_planted_at_a_predictable_temporary_name_is_not_written_through() {
 }
 
 #[test]
-#[ignore = "file-helpers"]
 fn two_writes_in_one_folder_use_two_temporary_names() {
     let folder = tempfile::tempdir().unwrap();
     let path = folder.path().join("set.dmx");
@@ -207,7 +197,6 @@ fn two_writes_in_one_folder_use_two_temporary_names() {
 }
 
 #[test]
-#[ignore = "file-helpers"]
 fn a_save_keeps_the_permissions_of_the_file_it_replaces() {
     let folder = tempfile::tempdir().unwrap();
     for mode in [0o600, 0o640, 0o444] {
@@ -221,7 +210,6 @@ fn a_save_keeps_the_permissions_of_the_file_it_replaces() {
 }
 
 #[test]
-#[ignore = "file-helpers"]
 fn a_new_private_file_is_for_its_owner_alone() {
     let folder = tempfile::tempdir().unwrap();
     let path = folder.path().join("untitled.autosave");
@@ -233,7 +221,6 @@ fn a_new_private_file_is_for_its_owner_alone() {
 }
 
 #[test]
-#[ignore = "file-helpers"]
 fn the_settings_file_is_read_with_a_limit_and_written_atomically() {
     let folder = tempfile::tempdir().unwrap();
 
