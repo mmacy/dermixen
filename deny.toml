@@ -1,7 +1,9 @@
-# The licenses a dependency may carry. `cargo deny check licenses` fails the
-# build when a crate in the dependency graph carries a license that is not on
-# this list, so a dependency that the GPL-3.0-or-later cannot combine with
-# is caught before it is merged. Continuous integration runs the check.
+# The dependency check `cargo deny check` runs. It checks licenses, advisories,
+# bans, and sources: a crate in the dependency graph must carry an allowed
+# license, must not carry a known vulnerability or an unmaintained-crate
+# advisory without a recorded reason, must not appear as an unpinned wildcard
+# dependency, and must come from a known registry or git source. Continuous
+# integration runs the check.
 
 [graph]
 all-features = true
@@ -9,7 +11,8 @@ all-features = true
 [licenses]
 allow = [
     "GPL-3.0-or-later",
-    "LGPL-3.0",
+    "LGPL-3.0-only",
+    "LGPL-3.0-or-later",
     "MIT",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
@@ -25,9 +28,45 @@ allow = [
 ]
 confidence-threshold = 0.8
 
+[[licenses.clarify]]
+name = "mp3lame-encoder"
+expression = "LGPL-3.0-only"
+license-files = []
+
+[[licenses.clarify]]
+name = "mp3lame-sys"
+expression = "LGPL-3.0-only"
+license-files = []
+
+[advisories]
+# Every crate in the graph carrying a RUSTSEC advisory needs either a fixed
+# version or an entry here saying why none applies yet.
+ignore = [
+    # lofty depends on paste, which its author has archived. No release of
+    # lofty has dropped the dependency, so no upgrade removes it.
+    "RUSTSEC-2024-0436",
+    # eframe's Linux accessibility support depends on zbus_xml through
+    # zbus-lockstep and atspi-common, and zbus_xml pins quick-xml to the
+    # 0.38 line, which has the quadratic attribute check this advisory
+    # describes. No release in that chain uses a fixed quick-xml yet.
+    "RUSTSEC-2026-0194",
+    # The same zbus_xml dependency also carries the unbounded
+    # namespace-declaration allocation this advisory describes, for the
+    # same reason: no release in the chain uses a fixed quick-xml yet.
+    "RUSTSEC-2026-0195",
+    # eframe depends on winit, which depends on ttf-parser through
+    # ab_glyph and sctk-adwaita. The ttf-parser author has stated the
+    # crate is unmaintained, and no fixed version exists.
+    "RUSTSEC-2026-0192",
+]
+
 [bans]
-multiple-versions = "allow"
-wildcards = "allow"
+multiple-versions = "warn"
+wildcards = "deny"
+# The workspace's own crates depend on each other with `workspace = true` and
+# no version, which the wildcard check would otherwise flag. This exempts
+# path dependencies inside the workspace, not a dependency on crates.io.
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"
