@@ -19,6 +19,8 @@ On long runs, establish a method for checking the integrated work against `DESIG
 
 Don't add features, refactor, or introduce abstractions beyond what the task requires. Do the simplest thing that works well. Only validate at system boundaries.
 
+Open pull requests by the rules in the pull requests section of `PLAN.md`. A pull request's page must list only its own commits.
+
 Record lessons about the build process in the project memory directory, one per file, and consult them at the start of a session. Do not record what the repository already states.
 
 Every document, comment, and summary you write follows the prose rules in `CLAUDE.md`: complete sentences, current truth only, no decision history, no invented labels.

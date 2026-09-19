@@ -44,6 +44,15 @@ Two instructions differ by model. Packets for Opus roles contain no instruction 
 
 Packets ask for a report of what was done and why the design holds. They do not ask an agent to explain its reasoning, which is phrasing that can trigger a refusal on Fable.
 
+## Pull requests
+
+`main` takes pull requests only. A pull request page lists every commit on its branch that `main` doesn't have yet, and the page stays that way after the merge. A branch cut from another unmerged branch therefore shows the other branch's work as its own, and the page can't be corrected after the merge.
+
+- Cut every branch from `main`.
+- When a branch has to build on another unmerged branch, set its pull request's base to that branch, not to `main`. GitHub changes the base to `main` when the parent branch merges.
+- Never cut a pull request branch from an integration branch that merges other unmerged branches.
+- Before opening a pull request, run `git log --oneline origin/main..HEAD` and confirm that it lists only the branch's own commits.
+
 ## Harness settings
 
 - `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` is 1, so a coder cannot spawn a team of its own.
