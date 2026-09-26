@@ -7,7 +7,7 @@ Dermixen is a desktop app for macOS and Linux for making DJ mixes. You put track
 Dermixen also has a [command-line interface (CLI)](cli.md), so an AI agent running in Claude Code or Codex can build a mix for you. Describe the set you want, and the agent picks tracks from your collection, orders them, and places the transitions. Then it opens the mix in the Dermixen window for you to fine-tune.
 
 ```text
-Create a new mix. I want it around 140 BPM, 1996-1997, ~90 minutes long, on the darker side, something a DJ would play between midnight and 3AM, a peak psychedelia set at a Goa party. Open the mix in the app when you're done.
+Create a new mix. I want it around 140 BPM, 1996-1997, ~90 minutes long, on the darker side, something a DJ would play between midnight and 3AM at a Goa party. Open the mix in the app when you're done.
 ```
 
 You don't need decks or a controller, and the result is a file you can share. Dermixen is free and open source under the GPL, version 3 or later.
