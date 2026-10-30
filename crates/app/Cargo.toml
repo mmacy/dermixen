@@ -26,9 +26,9 @@ dermixen-engine.workspace = true
 dermixen-library.workspace = true
 dermixen-media.workspace = true
 dirs = "7"
-eframe = "0.36"
-egui = "0.36"
-egui_extras = "0.36"
+eframe = "0.37"
+egui = "0.37"
+egui_extras = "0.37"
 macos-documents-sys = { path = "../macos-documents-sys" }
 rfd = "0.17"
 
